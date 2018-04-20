@@ -1,0 +1,273 @@
+\documentclass[twoside,10pt]{article}
+
+%================================ PREAMBLE ==================================
+
+%--------- Packages -----------
+\usepackage{fullpage}
+\usepackage{amssymb}
+\usepackage{amsmath}
+\usepackage{amsthm}
+\usepackage{latexsym}
+\usepackage{graphicx}
+\usepackage{color}
+\usepackage[hyphens]{url}
+\usepackage{mathtools}
+
+%\usepackage{algorithm,algorithmic}
+
+%----------Spacing-------------
+%\setlength{\oddsidemargin}{0.25 in}
+%\setlength{\evensidemargin}{-0.25 in}
+\setlength{\topmargin}{-0.6 in}
+%\setlength{\textwidth}{6.5 in}
+%\setlength{\textheight}{9.4 in}
+\setlength{\headsep}{0.75 in}
+\setlength{\parindent}{0 in}
+\setlength{\parskip}{0.1 in}
+
+%----------Header--------------
+\newcommand{\psetsubmission}[2]{
+   \pagestyle{myheadings}
+   \thispagestyle{plain}
+   \newpage
+   \setcounter{page}{1}
+   \noindent
+   \begin{center}
+   \framebox{
+      \vbox{\vspace{2mm}
+    \hbox to 6.28in { {\bf CIS 520: Machine Learning} \hfill {\bf Spring 2018} }
+       \vspace{6mm}
+       \hbox to 6.28in { \hfill {\Large #1: PDF Submission} \hfill }
+       \vspace{6mm}
+       \hbox to 6.28in { Name: \emph{#2} \hfill }
+      \vspace{2mm}}
+   }
+   \end{center}
+   \markboth{CIS 520: Machine Learning, Spring 2018, #1 PDF Submission}{#2}
+   \vspace*{4mm}
+}
+
+%--------Environments----------
+\theoremstyle{definition}
+\newtheorem{thm}{Theorem}[section]
+\newtheorem{lem}[thm]{Lemma}
+\newtheorem{prop}[thm]{Proposition}
+\newtheorem{cor}[thm]{Corollary}
+\newenvironment{pf}{{\noindent\sc Proof. }}{\qed}
+\newenvironment{map}{\[\begin{array}{cccc}} {\end{array}\]}
+
+\theoremstyle{definition}
+\newtheorem*{defn}{Definition}
+\newtheorem{exmp}{Example}
+\newtheorem*{prob}{Problem}
+\newtheorem*{exer}{Exercise}
+
+\theoremstyle{remark}
+\newtheorem*{rem}{Remark}
+\newtheorem*{note}{Note}
+
+%---------Definitions----------
+\newcommand{\Fig}[1]{Figure~\ref{#1}}
+\newcommand{\Sec}[1]{Section~\ref{#1}}
+\newcommand{\Tab}[1]{Table~\ref{#1}}
+\newcommand{\Tabs}[2]{Tables~\ref{#1}--\ref{#2}}
+\newcommand{\Eqn}[1]{Eq.~(\ref{#1})}
+\newcommand{\Eqs}[2]{Eqs.~(\ref{#1}-\ref{#2})}
+\newcommand{\Lem}[1]{Lemma~\ref{#1}}
+\newcommand{\Thm}[1]{Theorem~\ref{#1}}
+\newcommand{\Cor}[1]{Corollary~\ref{#1}}
+\newcommand{\App}[1]{Appendix~\ref{#1}}
+\newcommand{\Def}[1]{Definition~\ref{#1}}
+%
+\renewcommand{\>}{{\rightarrow}}
+\renewcommand{\hat}{\widehat}
+\renewcommand{\tilde}{\widetilde}
+\newcommand{\half}{\frac{1}{2}}
+%
+\newcommand{\R}{{\mathbb R}}
+\newcommand{\Z}{{\mathbb Z}}
+\newcommand{\N}{{\mathbb N}}
+\renewcommand{\P}{{\mathbf P}}
+\newcommand{\E}{{\mathbf E}}
+\newcommand{\Var}{{\mathbf{Var}}}
+\newcommand{\I}{{\mathbf I}}
+\newcommand{\1}{{\mathbf 1}}
+\newcommand{\0}{{\mathbf 0}}
+%
+\newcommand{\sign}{\textup{\textrm{sign}}}
+\newcommand{\er}{\textup{\textrm{er}}}
+\newcommand{\abs}{\textup{\textrm{abs}}}
+\newcommand{\sq}{\textup{\textrm{sq}}}
+\newcommand{\zo}{\textup{\textrm{0-1}}}
+%
+\renewcommand{\H}{{\mathcal H}}
+\newcommand{\F}{{\mathcal F}}
+\newcommand{\X}{{\mathcal X}}
+\newcommand{\Y}{{\mathcal Y}}
+\newcommand{\bX}{{\mathbf X}}
+%
+\newcommand{\p}{{\mathbf p}}
+\newcommand{\q}{{\mathbf q}}
+\renewcommand{\r}{{\mathbf r}}
+\newcommand{\x}{{\mathbf x}}
+\newcommand{\y}{{\mathbf y}}
+\renewcommand{\u}{{\mathbf u}}
+\newcommand{\w}{{\mathbf w}}
+%
+\newcommand{\bloss}{{\boldsymbol \ell}}
+\newcommand{\balpha}{{\boldsymbol \alpha}}
+\newcommand{\bxi}{{\boldsymbol \xi}}
+\newcommand{\bpsi}{{\boldsymbol \psi}}
+\newcommand{\btau}{{\boldsymbol \tau}}
+
+
+%=============================== END PREAMBLE ===============================
+
+%============================ BEGIN DOCUMENT ================================
+
+\begin{document}
+
+%Use the following format: \psetsubmission{problem set number}{name}
+
+\psetsubmission{Final Project}{Joseph Cappadona}
+
+%-------------------------------------------------- List Collaborators --------------------------------------------------
+
+
+{\bf Academic Honesty Declaration:}
+
+By submitting this document, I certify that all solutions below are \emph{my own work}. I have listed below all individuals (other than the course instructor/TAs) with whom I have discussed any of the problems and/or solutions; nevertheless, while I may have discussed some of the problems/solutions with these collaborators, I have written all solutions and code below \emph{independently, on my own.}
+\\
+
+{\bf Collaborators:}
+
+N/A
+
+\newpage
+%--------------------------------------------- Begin Problem Solutions  --------------------------------------------
+
+
+\section{Introduction}
+
+\subsection{The Problem}
+
+Information extraction is important to any data pipeline. But automating information extraction can be difficult, and there are many instances where manual data collection and entry is the only option. A robust document recognition and information extraction engine would vastly improve the rate at which certain types of data could be collected. Document classification and recognition can be used to extract data from forms, such as invoices {Liu et al}, memos, and ; from Heads-Up Diplays (HUDs), such as those used in mission simulators {Guarino de Vasconcelos et al.} and on sports broadcasts; and from web pages {Gogár and Baudiš}. Through my research, I hope to build a document recognition engine capable of tackling the above instances of document recognition.
+
+\subsection{Data Sets}
+I plan to obtain data from the following sources:
+
+\begin{enumerate}
+    \item
+    Scanned Business Documents
+    \begin{enumerate}
+        \item
+        Ghega-dataset, a dataset for document understanding and classification - \url{http://machinelearning.inginf.units.it/data-and-tools/ghega-dataset}
+    \end{enumerate}
+
+    \item
+    Heads-Up Displays
+    \begin{enumerate}
+        \item
+        Ace Combat 5 (for PlayStation 2) Gameplay Footage - \url{https://www.youtube.com/watch?v=lDU-pccy6UM}
+
+        \item
+        MLB The Show 16 (for PlayStation 4) Gameplay Footage - \url{https://www.youtube.com/watch?v=LoCjqdE5cdk}
+    \end{enumerate}
+
+    \item
+    Web Pages
+    \begin{enumerate}
+        \item
+        Wikipedia Articles - \url{https://www.wikipedia.org}
+
+        \item
+        Amazon Product Pages - \url{https://www.amazon.com}
+
+    \end{enumerate}
+\end{enumerate}
+
+The Ghega data set comes with document features already labeled, however data from the other sources will have to be labeled by hand.
+
+
+\section{Related Work}
+
+In 2013, Guarino de Vasconcelos et al., of the Flight Test Research Institute (Instituto de Pesquisas e Ensaios em Voo), along with the Aeronautical Technology Institute (Instituto Tecnológico de Aeronáutica), built an image processing application with pattern recognition to analyze the HUD of Flight Test Campaigns and extract information important to the analysis of the campaign, such as aircraft position parameters, aircraft configuration information, tracking mode, and time. Major limitations included its naive text recognition system, and image processing efficiency and text recognition accuracy, which were both largely due to the poor quality of the extracted HUD images.
+
+In 2012, Thakur et al. approached information extraction from un-structured documents by utilizing automated context-free grammar learning and alignment-based learning. This type of grammar learning provides a dynamic, adaptive approach to information extraction that is necessary for schema learning.
+
+In 2016, Liu, Wan, and Zhang, for their Stanford CS229 final project, built an unstructured document recognition system for business invoice processing centered around a bag-of-words approach that attempts to capture common layout and text features. They experimented with Naive Bayes, Multiclass (One-vs-All) Logistic Regression, and Multiclass (One-vs-All) Linear SVM. They were able to achieve 8.81\% training error and 13.99\% test error (through SVM) over a data set of 97 raw invoice images obtained from the internal testing library of the Oracle Corporation. They found $F_1$ score to be an effective means at comparing different models and found that $l_2$ regularization outperforms $l_1$ regularization for both logistic regression and linear SVM.
+
+
+\section{Problem Formulation}
+\subsection{Problem Formulation}
+Given a set of documents $X$ with associated sets of features $Y$, our goal is to train an algorithm $h$ to, given a new document instance $x$, pull out textual features of interest $\hat{f_i}$ and classify them into a category $\hat{c_i}$ to form a document feature $\hat{y} \coloneqq (\hat{f_i}, \hat{c_i})$. We will attempt to minimize the expected loss $L$, where 
+
+  \[ L(y, \hat{y}) = \frac{1}{|F(x)|}\sum_{f_i \in F(x)}{\mathbf{1}(h(\hat{f_i}) \ne c_i)} \] 
+
+or, in words, a loss of $\frac{1}{|F(x)|}$ is incurred for each textual feature $\hat{f_i}$ that is misclassified, and a loss of $1$ is incurred if all textual features for a given document are misclassified. We will assume that OCR will be consistent such that there is a one-to-one correspondence between features labeled during training and potential features identified during testing, and it is only the classification of the features that will be tested.
+
+\subsection{Data Processing}
+Data from the Ghega data set for document understanding and classification comes pre-annotated. Data from the Web Pages category will be accumulated by screenshotting select Wikipedia articles and Amazon product pages, running OCR on them, and hand-annotating key textual features. For data for the HUDs category, I will manually select stills from the videos in an attempt to simplify classification, run OCR on them, and hand-annotate key textual features.
+
+This data will then be used to train the several different information extraction models as described below, and evaluate them according to the metrics described in the following section.
+
+\subsection{Performance Measures}
+Of course, for each machine learning method experimented with, I will report its training error and (cross-)validation error.
+
+Additionally, I will seek to avoid overfitting by utilizing $L1$ and $L2$ regularization as done by Liu et al.
+
+Also similar to Liu et al., I plan to evaluate my models by computing $F_1$ scores. However, as described by Liu et al., since different the classification of categories will likely behave very differently (presumably dates will be easier to extract than other less structured data), instead of computing a single $F_1$ score for the entire model, we will compute the $F_1$ score for each category via a One-vs-All approach and then compute the average $F_1$ score across all categories, as these values provide a more wholistic metric for the model.
+
+
+\section{Solution Methods}
+Liu, Wan, and Zhang (2016) have experimented with Naive Bayes, Logistic Regression, and Linear SVM for document recognition. Despite Logistic Regression and Linear SVM clearly outperforming Naive Bayes, I plan to continue experimenting with all three methods to see if different methods work better in different scenarios.
+
+I also plan to experimenting with boosting. Some sample weak learners that I think would provide a good foundation for a boosting approach are:
+
+\begin{enumerate}
+    \item
+    Does feature contain numbers?
+
+    \item
+    Is feature a proper noun?
+
+    \item
+    Is feature horizontally aligned with other features?
+
+    \item
+    Is feature vertically aligned with other features?
+
+    \item
+    Does feature's location approximately match any previously seen feature's location?
+
+    \item
+    Does document as a whole match any known document schemas?
+\end{enumerate}
+
+Additionally, the work described above by Thankur et al. on grammar-based learning could provide an automated means of enhancing our boosting algorithm as we see new document formats.
+
+\section{Plan of Work}
+
+Rough outline of steps:
+
+\begin{enumerate}
+    \item
+    Implement simple bag-of-words feature extraction and classification using Naive Bayes, Multiclass Logistic Regression, and Multiclass SVM as described in {Liu et al}; test on new data sets
+
+    \item
+    Implement a boosting approach to feature classification as described in {Ives 2003} in an attempt to extract information from consistent, structured documents (like HUDs and Web Pages)
+
+    \item
+    Implement automated grammar/schema learning as described in {Thakur et al} to enhance the boosting approach and extend our model to be able to automatically learn the structure of new documents
+
+    \item
+    Experiment with different methods for feature generation, such as clustering according to semantic content (from the idea that )
+\end{enumerate}
+
+
+
+
+\end{document}
+
+%=========================== END DOCUMENT ==============================
+

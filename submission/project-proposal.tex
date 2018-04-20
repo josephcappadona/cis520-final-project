@@ -1,0 +1,320 @@
+\documentclass[twoside,11pt]{article}
+
+%================================ PREAMBLE ==================================
+
+%--------- Packages -----------
+\usepackage{fullpage}
+\usepackage{amssymb}
+\usepackage{amsmath}
+\usepackage{amsthm}
+\usepackage{latexsym}
+\usepackage{graphicx}
+\usepackage{wrapfig}
+\usepackage{color}
+\usepackage{comment}
+\usepackage{mathtools}
+\usepackage[hyphens]{url}
+\usepackage{hyperref}
+%\usepackage{algorithm,algorithmic}
+
+%---------- Spacing ----------
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{8pt}
+
+%---------Definitions----------
+\newcommand{\half}{{\textstyle{\frac{1}{2}}}}
+\renewcommand{\>}{{\rightarrow}}
+\renewcommand{\hat}{\widehat}
+\renewcommand{\tilde}{\widetilde}
+\newcommand{\grad}{{\nabla}}
+%
+\newcommand{\argmax}{\textup{\textrm{argmax}}}
+\newcommand{\argmin}{\textup{\textrm{argmin}}}
+\newcommand{\argsort}{\textup{\textrm{argsort}}}
+\newcommand{\sign}{\textup{\textrm{sign}}}
+\newcommand{\poly}{\textup{\textrm{poly}}}
+\newcommand{\er}{\textup{\textrm{er}}}
+\newcommand{\zo}{\textup{\textrm{0-1}}}
+\newcommand{\sq}{\textup{\textrm{sq}}}
+%
+\newcommand{\1}{{\mathbf 1}}
+\newcommand{\0}{{\mathbf 0}}
+\newcommand{\I}{{\mathbf I}}
+\newcommand{\R}{{\mathbb R}}
+\newcommand{\Z}{{\mathbb Z}}
+\newcommand{\N}{{\mathbb N}}
+\renewcommand{\P}{{\mathbf P}}
+\newcommand{\E}{{\mathbf E}}
+\newcommand{\Var}{{\mathbf{Var}}}
+%
+\renewcommand{\a}{{\mathbf a}}
+\renewcommand{\b}{{\mathbf b}}
+\renewcommand{\c}{{\mathbf c}}
+\renewcommand{\d}{{\mathbf d}}
+\newcommand{\f}{{\mathbf f}}
+\renewcommand{\k}{{\mathbf k}}
+\newcommand{\p}{{\mathbf p}}
+\newcommand{\q}{{\mathbf q}}
+\renewcommand{\u}{{\mathbf u}}
+\newcommand{\w}{{\mathbf w}}
+\newcommand{\x}{{\mathbf x}}
+\newcommand{\y}{{\mathbf y}}
+%
+\newcommand{\A}{{\mathbf A}}
+\newcommand{\bC}{{\mathbf C}}
+\newcommand{\C}{{\mathcal C}}
+\newcommand{\cD}{{\mathcal D}}
+\newcommand{\F}{{\mathcal F}}
+\renewcommand{\H}{{\mathcal H}}
+\newcommand{\K}{{\mathbf K}}
+\renewcommand{\L}{{\mathcal L}}
+\newcommand{\bL}{{\mathbf L}}
+\newcommand{\cN}{{\mathcal N}}
+\newcommand{\W}{{\mathbf W}}
+\newcommand{\X}{{\mathcal X}}
+\newcommand{\bX}{{\mathbf X}}
+\newcommand{\Y}{{\mathcal Y}}
+%
+\newcommand{\bloss}{{\boldsymbol \ell}}
+\newcommand{\blambda}{{\boldsymbol \lambda}}
+\newcommand{\bmu}{{\boldsymbol \mu}}
+\newcommand{\bnu}{{\boldsymbol \nu}}
+\newcommand{\bSigma}{{\boldsymbol \Sigma}}
+\newcommand{\seta}{{\boldsymbol \eta}}
+\newcommand{\bpsi}{{\boldsymbol \psi}}
+\newcommand{\bphi}{{\boldsymbol \phi}}
+\newcommand{\bPhi}{{\boldsymbol \Phi}}
+\newcommand{\balpha}{{\boldsymbol \alpha}}
+\newcommand{\bxi}{{\boldsymbol \xi}}
+
+%=============================== END PREAMBLE ===============================
+
+\begin{document}
+
+%================================ COVER PAGE ================================
+
+%*********** Use this for project proposal (comment out in project report) ************
+\emph{\footnotesize{CIS 520 Spring 2018, Project Proposal}}
+
+%*********** Use this for project report (comment out in project proposal) ************
+%\emph{\footnotesize{CIS 520 Spring 2018, Project Report}}
+
+\vspace{12pt}
+
+%Fill in your project title
+\textbf{\Large{}}
+
+\vspace{1cm}
+
+\textbf{Team Members:}
+
+%Fill in your team details; remove any lines that are not needed
+Joseph Cappadona (PennKey: \texttt{jcapp}; Email: \texttt{jcapp@seas.upenn.edu}) \\
+
+%---
+
+\vspace{2cm}
+
+%*********** Comment out the following for the proposal; uncomment and fill in all details for the project report ***********
+\begin{comment}
+    \textbf{Assigned Project Mentor:}
+
+    %Fill in assigned TA name
+    TA-Firstname TA-Lastname
+
+    \vspace{1cm}
+
+    \textbf{Team Member Contributions:}
+
+    %Fill in team member contributions
+    \begin{center}
+    \begin{tabular}{|l|l|}
+    \hline
+    Team Member & Contributions \\
+    \hline
+    Firstname1 Lastname1 & list of contributions \\
+    	& (continue if needed) \\
+    \hline
+    Firstname2 Lastname2 & list of contributions \\
+    	& (continue if needed) \\
+    \hline
+    Firstname3 Lastname3 & list of contributions \\
+    	& (continue if needed) \\
+    \hline
+    Firstname4 Lastname4 & list of contributions \\
+    	& (continue if needed) \\
+    \hline
+    \end{tabular}
+    \end{center}
+
+    \vspace{12pt}
+
+    \textbf{Code Submission:}
+
+    [Mention whether code is being submitted on Canvas or via a github repository; if latter, provide a link to the repository]
+
+\end{comment}
+\newpage
+%============================= MAIN DOCUMENT ================================
+
+%*********** Use this to include abstract in project report (comment out in project proposal) ***********
+%\begin{abstract}
+%Abstract for project report goes here.
+%\end{abstract}
+
+
+%*********** Recommended section structure for project proposal below (comment out in project report) ************
+
+\section{Introduction}
+
+\subsection{The Problem}
+
+Information extraction is important to any data pipeline. But automating information extraction can be difficult, and there are many instances where manual data collection and entry is the only option. A robust document recognition and information extraction engine would vastly improve the rate at which certain types of data could be collected. Document classification and recognition can be used to extract data from forms, such as invoices \cite{LiuWanZhang2016}, memos, and advertisements; from Heads-Up Diplays (HUDs), such as those used in mission simulators \cite{Guarino2013} and on sports broadcasts; and from web pages \cite{Gogar2016}. Current methods employ the use of layout analysis \cite{Dejean2015}, context-free grammar learning \cite{Thakur2012}, deep neural networks \cite{Gogar2016, Meerkamp2016, Kumar2017, Nguyen2017}, and classifiers like Naive Bayes, logistic regression, and linear SVM \cite{LiuWanZhang2016}.
+
+\subsection{Data Sets}
+I plan to obtain data from the following sources:
+
+\begin{enumerate}
+    \item
+    Scanned Business Documents
+    \begin{enumerate}
+        \item
+        \sloppy
+        Ghega-dataset, a dataset for document understanding and classification - \url{http://machinelearning.inginf.units.it/data-and-tools/ghega-dataset}
+    \end{enumerate}
+
+    \item
+    Heads-Up Displays
+    \begin{enumerate}
+        \item
+        Ace Combat 5 (for PlayStation 2) Gameplay Footage - \url{https://www.youtube.com/watch?v=lDU-pccy6UM}
+
+        \item
+        MLB The Show 16 (for PlayStation 4) Gameplay Footage - \url{https://www.youtube.com/watch?v=LoCjqdE5cdk}
+    \end{enumerate}
+
+    \item
+    Web Pages
+    \begin{enumerate}
+        \item
+        Wikipedia Articles - \url{https://www.wikipedia.org}
+
+        \item
+        Amazon Product Pages - \url{https://www.amazon.com}
+
+    \end{enumerate}
+\end{enumerate}
+
+The Ghega data set comes with document features already labeled, however data from the other sources will have to be labeled by hand.
+
+
+%===============================================================================
+
+\section{Related Work}
+
+In \cite{Guarino2013}, the authors built an image processing application with pattern recognition to analyze the HUD of Flight Test Campaigns and extract information important to the analysis of the campaign, such as aircraft position parameters, aircraft configuration information, tracking mode, and time. Major limitations included its naive text recognition system, and image processing efficiency and text recognition accuracy, which were both largely due to the poor quality of the extracted HUD images. Additionally, this type of analysis is only effective for static, structured documents.
+
+\cite{Thakur2012} approached information extraction from un-structured documents by utilizing automated context-free grammar learning and alignment-based learning. This type of grammar learning provides a dynamic, adaptive approach to information extraction that is necessary for schema learning. Similarly, \cite{Dejean2015} implemented layout analysis in order to learn common layout schemas for unstructured documents.
+
+In \cite{LiuWanZhang2016}, the authors built an unstructured document recognition system for business invoice processing centered around a bag-of-words approach that attempts to capture common layout and text features. They experimented with Naive Bayes, Multiclass (One-vs-All) Logistic Regression, and Multiclass (One-vs-All) Linear SVM. They were able to achieve 8.81\% training error and 13.99\% test error (through SVM) over a data set of 97 raw invoice images obtained from the internal testing library of the Oracle Corporation. They found $F_1$ score to be an effective means at comparing different models and found that $l_2$ regularization outperforms $l_1$ regularization for both logistic regression and linear SVM.
+
+Comprehensive surveys such as \cite{Kumar2017, Nguyen2017} demonstrate the potential for the use of deep neural networks for information extraction and document classification. However, these approaches rely on large repositories of documents, which can be problematic for certain use cases.
+
+
+%===============================================================================
+
+\section{Problem Formulation}
+\subsection{Problem Formulation}
+Given a set of documents $X$ with associated sets of features $Y$, our goal is to train an algorithm $h$ to, given a new document instance $x$, pull out textual features of interest $\hat{f_i}$ and classify them into category $\hat{c_i}$ to form a document feature $\hat{y_i} \coloneqq (\hat{f_i}, \hat{c_i})$. We will attempt to minimize the expected loss $L$, where 
+
+  \[ L(y, \hat{y}) = \frac{1}{|F(x)|}\sum_{f_i \in F(x)}{\mathbf{1}(h(\hat{f_i}) \ne c_i)} \] 
+
+or, in words, a loss of $\frac{1}{|F(x)|}$ is incurred for each textual feature $\hat{f_i}$ that is misclassified, and a loss of $1$ is incurred if all textual features for a given document are misclassified. We will assume that OCR will be consistent such that there is a one-to-one correspondence between features labeled during training and potential features identified during testing, and it is only the classification of the features that will be tested.
+
+\subsection{Data Processing}
+Data from the Ghega data set for document understanding and classification comes pre-annotated. Data from the Web Pages category will be accumulated by screenshotting select Wikipedia articles and Amazon product pages, running OCR on them, and hand-annotating key textual features. For data for the HUDs category, I will manually select stills from the videos in an attempt to simplify classification, run OCR on them, and hand-annotate key textual features.
+
+This data will then be used to train the several different information extraction models as described below, and evaluate them according to the metrics described in the following section.
+
+\subsection{Performance Measures}
+Of course, for each machine learning method experimented with, I will report its training error and (cross-)validation error.
+
+Additionally, I will seek to avoid overfitting my models by utilizing $L1$ and $L2$ regularization and evaluating the change in model performance with variation in these parameters.
+
+Also, I plan to evaluate my models by computing $F_1$ scores. However, as described by \cite{LiuWanZhang2016}, since the classification of different categories will likely behave very differently (e.g., dates and phone numbers will presumably be easier to extract than alphanumeric ID tags), instead of computing a single $F_1$ score for the entire model, we will compute the $F_1$ score for each classification category via a One-vs-All approach and then compute the average $F_1$ score across all categories, as these values provide a more wholistic metric for the model.
+
+
+%===============================================================================
+
+\section{Solution Methods}
+
+\cite{LiuWanZhang2016} have experimented with Naive Bayes, Logistic Regression, and Linear SVM for unstructured document entity recognition. Despite Logistic Regression and Linear SVM clearly outperforming Naive Bayes, I plan to continue experimenting with all three methods to see if different methods work better in different scenarios with different feature generation procedures.
+
+The work described above by \cite{Thakur2012, Dejean2015} on grammar- and layout-based learning will allow us to learn common structures among differently structured documents with similar content.
+
+As described in \cite{Gogar2016, Meerkamp2016, Kumar2017, Nguyen2017}, Convolutional Neural Networks (CNNs) provide an effective means of learning document layouts and data schemas. I plan to experiment with these as well, however, other methods will be focused on due to the small size of the data sets I am working with, as well as due to the preference of learning human-understandable patterns (as opposed to the minimally human-understandable information that can be extracted from CNNs).
+
+Additionally, I will experiment with k-Nearest Neighbor methods. For structured data from known documents, 1NN should be able to effectively detect which layout or information schema the document matches with. For documents with unstructured data and incomplete schemas, kNN on a global (considering the entire document) and local (considering only nearby entities) level could give us a good estimation of the layouts or schemas that best match the document being analyzed.
+
+If time permits, I would also like to experiment with a boosting approach as detailed in \cite{Ives2003}. Boosting permits us to use weak learners based on learned layout and schema constraints to boost classification performance.
+
+%===============================================================================
+
+\section{Plan of Work}
+
+Rough outline of steps:
+
+\begin{enumerate}
+    \item
+    Implement simple bag-of-words feature extraction and classification using Naive Bayes, Multiclass Logistic Regression, and Multiclass SVM as described in \cite{LiuWanZhang2016}; test on new data sets; experiment with different feature generation procedures
+
+    \item
+    Implement automated grammar/schema learning as described in \cite{Dejean2015} to learn document layouts and information schemas
+
+    \item
+    Implement kNN to enhance schema matching
+
+    \item
+    If time permits, experiment with CNNs to learn document layouts and information schemas
+
+    \item
+    If time permits, implement a boosting approach to feature classification as described in \cite{Ives2003} in an attempt to extract information from consistent, structured documents (like HUDs and Web Pages)
+
+\end{enumerate}
+
+%===============================================================================
+
+
+%*********** Recommended section structure for project report below (comment out in project proposal) ************
+
+%\section{Introduction}
+
+%\section{Related Work}
+
+%Note: Using BibTex makes it easy to include citations to references! For example, here are citations to Bishop's book \cite{Bishop06}, the UCI machine learning repository \cite{DuaKa17}, and a couple of papers \cite{FreundSc96,LeCun+15}.
+
+%\section{Data Set}
+
+%\section{Problem Formulation}
+
+%\section{Algorithms}
+
+%\section{Experimental Design and Results}
+
+%\section{Conclusion and Discussion}
+
+%\section*{Acknowledgments}
+
+
+\newpage
+%============================= BIBLIOGRAPHY ===============================
+
+\bibliographystyle{unsrt}
+\bibliography{project-proposal}
+
+
+
+\end{document}
+
+%=========================== END DOCUMENT ==============================
+
