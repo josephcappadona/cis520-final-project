@@ -781,42 +781,79 @@ def get_ghega_labels(groundtruth_blocks):
         y[element_type + '_value'] = True
     return y
 
-from collections import OrderedDict
-def build_ghega_ys(gt_filepaths):
-    ys = [get_ghega_labels(import_groundtruth(fp)) for fp in gt_filepaths]
+def build_gt_classes(gt_blocks_list):
+    ys = [get_ghega_labels(gt_blocks) for gt_blocks in gt_blocks_list]
     classes = set()
     for y in ys:
         for k in y.keys():
             classes.add(k)
-    sorted_classes = sorted(classes)
-    ys_ = np.zeros((len(gt_filepaths), len(classes)))
-    for i,y in enumerate(ys):
-        y_ = np.zeros((len(classes)))
-        for j,class_ in enumerate(sorted_classes):
-            try:
-                y_[j] = int(y[class_])
-            except KeyError:
-                y_[j] = 0
-        ys_[i] = y_
-    return ys_
-
+    return sorted(classes)
 def build_ghega_Xy(img_filepaths, gt_filepaths, w2v, scaling_factor=1.0):
-    y = build_ghega_ys(gt_filepaths)
-    
+    gt_blocks_list, blocks_list = [], []
+    for i, (img_fp, gt_fp) in enumerate(zip(img_filepaths, gt_filepaths)):
+        print('\n\nProcessing {} ({} of {})'.format(img_fp, i+1, len(img_filepaths)))
+        
+        blocks = import_blocks(None, img_filepath=img_fp)
+        eps, (h,v,d), sep = (7, (True,False,False), '')
+        blocks_list += [get_clustered_blocks(blocks[:], eps=eps, horizontal=h, vertical=v, diag=d, sep=sep)]
+
+        gt_blocks_list += [import_groundtruth(gt_fp)]
+    sorted_classes = build_gt_classes(gt_blocks_list)
+
     img_shape = w, h = PIL.Image.open(img_filepaths[0]).size 
     w, h = int(round(scaling_factor*w)), int(round(scaling_factor*h))
 
-    X = sparray((len(img_filepaths), h, w, W2V_DIM))
-    for i, img_fp in enumerate(img_filepaths):
-        print('\n\nProcessing {} ({} of {})'.format(img_fp, i+1, len(img_filepaths)))
-        blocks = import_blocks(None, img_filepath=img_fp)
+    Xs = []; x_file = open("../data/preprocessed/patents_X.pickle", "wb")
+    Ys = []; y_file = open("../data/preprocessed/patents_Y.pickle", "wb")
+    # sparray((len(gt_filepaths), len(sorted_classes)+1))
+    for i, (blocks, gt_blocks) in enumerate(zip(blocks_list, gt_blocks_list)):
+        X = build_ghega_x(blocks, img_shape, w2v, scaling_factor=scaling_factor)
+        Y = np.zeros((len(sorted_classes)+1))
+        ROI_neg = sparray((h, w, 1))
+        for x in range(w):
+            for y in range(h):
+                ROI_neg[y,x] = 1
+        for gt_block in gt_blocks:
+            if gt_block['label_exists']:
+                ROI_l = sparray((h, w, 1))
+                l_x, l_y, l_w, l_h = gt_block['label_x'], gt_block['label_y'], gt_block['label_w'], gt_block['label_h']
+                l_x, l_y, l_w, l_h = int(round(scaling_factor*l_x)), int(round(scaling_factor*l_y)), int(round(scaling_factor*l_w)), int(round(scaling_factor*l_h))
+                # mark "region-of-interest" as 1, negative ROI as 0
+                for x in range(l_x, l_x+l_w+1):
+                    for y in range(l_y, l_y+l_h+1):
+                        ROI_l[y,x] = 1
+                        ROI_neg[y,x] = 0
+                X_l = (X, ROI_l) # X_l = np.c_[X.dense(), ROI_l.dense()]
+                Y_l = Y.copy()
+                Y_l[sorted_classes.index(gt_block['element_type'].lower()+'_label')] = 1
 
-        eps, (h,v,d), sep = (7, (True,False,False), '')
-        clustered_blocks = get_clustered_blocks(blocks[:], eps=eps, horizontal=h, vertical=v, diag=d, sep=sep)
-       
-        x = build_ghega_x(clustered_blocks, img_shape, w2v, scaling_factor=scaling_factor)
-        X[i] = x
-    return X, y
+                pickle.dump(X_l, x_file)# Xs.append(nparray_to_sparray_3d(X_l))
+                pickle.dump(Y_l, y_file)# Ys.append(Y_l)
+
+            if gt_block['value_text']:
+                ROI_v = sparray((h, w, 1))
+                v_x, v_y, v_w, v_h = gt_block['value_x'], gt_block['value_y'], gt_block['value_w'], gt_block['value_h']
+                v_x, v_y, v_w, v_h = int(round(scaling_factor*v_x)), int(round(scaling_factor*v_y)), int(round(scaling_factor*v_w)), int(round(scaling_factor*v_h))
+                # mark "region-of-interest" as 1
+                for x in range(v_x, v_x+v_w+1):
+                    for y in range(v_y, v_y+v_h+1):
+                        ROI_v[y,x] = 1
+                        ROI_neg[y,x] = 1
+                X_v = (X, ROI_v) # X_v = np.c_[X.dense(), ROI_v.dense()]
+                Y_v = Y.copy()
+                Y_v[sorted_classes.index(gt_block['element_type'].lower()+'_value')] = 1
+
+                pickle.dump(X_v, x_file) #Xs.append(nparray_to_sparray_3d(X_v))
+                pickle.dump(Y_v, y_file) #Ys.append(Y_v)
+
+        X_neg = (X, ROI_neg) # X_neg = np.c_[X, ROI_neg]
+        Y_neg = Y.copy()
+        Y_neg[-1] = 1
+
+        pickle.dump(X_neg, x_file) #Xs.append(nparray_to_sparray_3d(X_neg))
+        pickle.dump(Y_neg, y_file) #Ys.append(Y_neg)
+    return "../data/preprocessed/patents_X.pickle", "../data/preprocessed/patents_Y.pickle" #Xs, Ys
+
 
 from gensim.models.word2vec import Word2Vec
 W2V_DIM = 100
@@ -858,6 +895,19 @@ def get_ghega_gt_files(datasheets_or_patents):
     return get_files(dir_path, '*.groundtruth.csv')
     
 
+iii = -1
+def nparray_to_sparray_3d(arr):
+    global iii
+    iii += 1
+    print("Converting array {}".format(iii))
+    sparr = sparray(arr.shape)
+    for i in range(arr.shape[0]):
+        for j in range(arr.shape[1]):
+            for k in range(arr.shape[2]):
+                if arr[i,j,k] != 0:
+                    sparr[i,j,k] = arr[i,j,k]
+    return sparr
+
 
 
 def process_ghega_data():
@@ -879,6 +929,21 @@ if __name__ == "__main__":
 
 
 
+
+
+
+
+
+def extract_features_(blocks):
+    for block in blocks:
+        label_words = []
+        if block['label_exists']:
+            feature_name = block['element_type'].lower() + '_label'
+            feature_dict[feature_name] = label_words = block['label_text'].lower().split()
+        feature_name = block['element_type'].lower() + '_value'
+        feature_dict[feature_name] = value_words = block['value_text'].lower().split()
+        feature_dict['words'] = set(value_words).union(label_words)
+    return feature_dict
 
 
 
