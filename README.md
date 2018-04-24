@@ -1,6 +1,6 @@
 # cis520-final-project
 
-##TODO
+# # TODO
 * Clean & refactor `src/app.py`
 * Implement known schema detection
 * Try different parameters for feature generation/selection
