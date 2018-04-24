@@ -16,27 +16,40 @@ TESSERACT_CACHE_DIR = '../tesseract'
 WINDOW_SIZE = (800, 1000)
 MODELED_DOCUMENT_VIEW_SIZE = (750, 800)
 MODELED_DOCUMENT_VIEW_PADDING = 50
-CUSTOM_PARAMS = [(7, (True,False,False), ''), # link tokens to form words
-                 (40, (True,False,False), ' '), # link tokens in line
-                 (25, (False,True,False), None),
-                 (1, (True,True,True), None),
-                 (1, (True,True,True), None)]
 
-CUSTOM_PARAMS_2 = [(7, (True,False,False), ''), # link tokens to form words
-                 (200, (True,False,False), ' '), # link tokens in line
-                 (50, (False,True,False), None),
-                 (1, (True,True,True), None),
-                 (1, (True,True,True), None)]
-class AppImportError(ValueError):
-    def __init__(self, msg):
-        super(ValueError, self).__init__()
-        self.args += (msg, )
+
+CUSTOM_PARAMS_PATENTS = [(40, (True,False,False), ' '), # form lines
+                         (25, (False,True,False), None), # form blocks
+                         (1, (True,True,True), None), # link overlapping boxes
+                         (1, (True,True,True), None)] # link overlapping boxes
+CUSTOM_PARAMS_DATASHEETS = [(200, (True,False,False), ' '),
+                            (50, (False,True,False), None),
+                            (1, (True,True,True), None),
+                            (1, (True,True,True), None)]
+DEFAULT_PARAMS = [(10, (True,False,False), ''), # form words
+                  (75, (True,False,False), ' '), # form lines
+                  (25, (False,True,False), None),
+                  (1, (True,True,True), None),
+                  (1, (True,True,True), None)]
+def get_DBSCAN_params(patents_or_datasheets):
+    if patents_or_datasheets == 'patents':
+        return CUSTOM_PARAMS_PATENTS
+    elif patents_or_datasheets == 'datasheets':
+        return CUSTOM_PARAMS_DATASHEETS
+    else:
+        return DEFAULT_PARAMS
 
 
 ########################
 # GENERIC DATA IMPORTS #
 ########################
 from pandas import read_csv
+
+class AppImportError(ValueError):
+    def __init__(self, msg):
+        super(ValueError, self).__init__()
+        self.args += (msg, )
+
 
 BLOCKS_COLUMNS = ['x',
                   'y',
@@ -66,6 +79,10 @@ def import_blocks(filepath, img_filepath=None):
 
     blocks = blocks_df.T.to_dict().values()
     for block in blocks:
+        if type(block['text']) != str:
+            block['text'] = ''
+        else:
+            block['text'] = clean_sentence(block['text'])
         block['texts'] = [[block['text']]]
     return blocks
 
@@ -100,6 +117,10 @@ def import_groundtruth(filepath):
             gt_df = gt_df.drop(column_name, axis=1)
 
     groundtruth = gt_df.T.to_dict().values()
+    for gt_block in groundtruth:
+        if gt_block['label_exists']:
+            gt_block['label_text'] = clean_sentence(gt_block['label_text'])
+        gt_block['value_text'] = clean_sentence(gt_block['value_text'])
     return groundtruth
 
 
@@ -291,7 +312,9 @@ class AppDoc(Document):
 
     def init_doc(self, filepath, blocks_filepath=None, gt_filepath=None):
         self.filepath = filepath
-        self.modeled_doc = ModeledDocument(filepath, MODELED_DOCUMENT_VIEW_SIZE, blocks_filepath=blocks_filepath, gt_filepath=gt_filepath)
+        doc_type = 'patents' if 'patents' in filepath else 'datasheets' if 'datasheets' in filepath else None
+        params = get_DBSCAN_params(doc_type)
+        self.modeled_doc = ModeledDocument(filepath, MODELED_DOCUMENT_VIEW_SIZE, blocks_filepath=blocks_filepath, gt_filepath=gt_filepath, params=params)
         self.changed()
         self.notify_views()
 
@@ -342,7 +365,7 @@ class ModeledDocument(Image):
             self.blocks = [{k: (resize(v) if k in resize_fields else v) for k, v in block.iteritems()} for block in blocks]
 
             clustered_blocks = blocks[:]
-            self.params = params if params else CUSTOM_PARAMS
+            self.params = get_DBSCAN_params(params)
             self.eps, self.hvd, self.seps = zip(*self.params)
             print('Iteratively finding block clusters...')
             clustered_blocks = get_clustered_blocks(clustered_blocks, CUSTOM_PARAMS)
@@ -645,7 +668,7 @@ def blocks_v_overlap(b1, b2):
 # DBSCAN #
 ##########
 def DBSCAN(DB, dist, eps, min_pts):
-    print("Running DBSCAN (eps = {})....".format(eps))
+    #print("Running DBSCAN (eps = {})....".format(eps))
     C = -1
     labels = {P:None for P in DB}
     for P in DB:
@@ -716,6 +739,50 @@ def get_pytesseract_boxes(img_filepath):
     return res
 
 
+def get_tesseract_layout_analysis(img_filepath):
+    # cache filepath
+    img_filename = img_filepath.split('/')[-1]
+    cache_filename = img_filename + '.tesseract-la'
+    cache_filepath = TESSERACT_CACHE_DIR + '/' + cache_filename
+
+    if os.path.exists(cache_filepath):
+        print('Found {} in cache!'.format(cache_filepath))
+        with open(cache_filepath, 'r') as cache_file:
+            res = cache_file.read()
+    else:
+        print("Running pytesseract layout analysis for {}...".format(img_filepath))
+        img = PIL.Image.open(img_filepath)
+        res = pytesseract.image_to_data(img, config='--psm 1 tsv', lang='eng')
+
+        with open(cache_filepath, 'w') as cache_file:
+            cache_file.write(res)
+    res = unicode(res)
+    return io.StringIO(res)
+
+
+# features[word_1]:
+#   hAlign_word_2
+#   sameBlock_word_2
+#   len_line
+def get_tesseract_layout_analysis_blocks(tsv, gt_blocks):
+    word_dicts = read_csv(tsv, sep='\t', header=0).T.to_dict().values()
+
+    # iterate over word blocks
+    for i, word_dict in enumerate(word_dicts):
+        block_dict = {}
+        # if block is textual
+        if word_dict['text']:
+            if str(word_dict['text']).lower() == 'nan':
+                continue
+            block_dict['w'] = int(word_dict['width'])
+            block_dict['h'] = int(word_dict['height'])
+            block_dict['x'] = int(word_dict['left'])
+            block_dict['y'] = int(word_dict['top'])
+            word = block_dict['text'] = clean_sentence(word_dict['text'].lower())
+            block_dict['texts'] = [[word_dict['text']]]
+
+            yield block_dict
+
 
 #################
 # BUILD LEXICON #
@@ -729,7 +796,7 @@ ALPHABET = set('abcdefghijklmnopqrstuvwxyz')
 NUMERALS = set('1234567890')
 
 def clean_word(word):
-    word = word.lower()
+    word = word.lower().strip('()[]"\':;.!?,@`').replace(',', '')
     if '$' in word:
         word = '__MONEY__'
     elif re.match(DATE_REGEX, word):
@@ -738,6 +805,12 @@ def clean_word(word):
         word = '__TELE__'
     elif re.match(EMAIL_REGEX, word):
         word = '__EMAIL__'
+    elif is_numeric(word):
+        word = '__NUM__'
+    elif is_alphanumeric(word):
+        word = '__ALPHANUM__'
+    elif any(c in word for c in '*_|\\!@#~[]{}()`?\"=+'):
+        word = '__GARB__'
     return word
 
 def clean_sentence(sentence):
@@ -755,219 +828,10 @@ def extract_text(blocks):
                 sentences.append(' '.join(text_block))
     return [clean_sentence(sentence) for sentence in sentences]
 
-import sys
-reload(sys)
-sys.setdefaultencoding('utf8')
-from sparray import sparray # http://www.janeriksolem.net/sparray-sparse-n-dimensional-arrays-in.html
 
-
-#############
-# BUILD X,y #
-#############
-# TODO: build ability to mask around particular block
-# run on first set of cluster blocks
-# use as input to CNN
-def build_ghega_x(blocks, img_shape, w2v, scaling_factor=1.0):
-    w, h = img_shape
-    w, h = int(round(scaling_factor*w)), int(round(scaling_factor*h))
-    model = sparray((h, w, W2V_DIM))
-
-    for block in blocks:
-        word = clean_word(block['texts'][0][0])
-        if word not in w2v:
-            vocab = w2v.vocab.keys()
-            word = vocab[np.argmin([Levenshtein.distance(w, word.encode('utf-8', errors='replace')) for w in vocab])]
-        for x in range(block['x'], block['x']+block['w']+1):
-            x = int(round(scaling_factor * x))
-            for y in range(block['y'], block['y']+block['h']+1):
-                y = int(round(scaling_factor * y))
-                model[h-1-y,x] = w2v[word]
-    return model
-
-def get_ghega_labels(groundtruth_blocks):
-    y = {}
-    for block in groundtruth_blocks:
-        element_type = block['element_type'].lower()
-        y[element_type + '_label'] = block['label_exists']
-        y[element_type + '_value'] = True
-    return y
-
-def build_gt_classes(gt_blocks_list):
-    ys = [get_ghega_labels(gt_blocks) for gt_blocks in gt_blocks_list]
-    classes = set()
-    for y in ys:
-        for k in y.keys():
-            classes.add(k)
-    return sorted(classes)
-
-def build_ghega_X(img_filepaths, gt_filepaths, w2v, scaling_factor=1.0):
-    gt_blocks_list, blocks_list, clustered_blocks_list = [], [], []
-    for i, (img_fp, gt_fp) in enumerate(zip(img_filepaths, gt_filepaths)):
-        print('\n\nProcessing {} ({} of {})'.format(img_fp, i+1, len(img_filepaths)))
-        
-        blocks = import_blocks(None, img_filepath=img_fp)
-        clustered_blocks = get_clustered_blocks(blocks[:], CUSTOM_PARAMS)
-        blocks_list += [clustered_blocks]
-
-        gt_blocks_list += [import_groundtruth(gt_fp)]
-    sorted_classes = build_gt_classes(gt_blocks_list)
-
-
-
-    img_shape = w, h = PIL.Image.open(img_filepaths[0]).size 
-    w, h = int(round(scaling_factor*w)), int(round(scaling_factor*h))
-    yield ((h,w,W2V_DIM+1))
-
-    Xs = []; x_file = open("../data/preprocessed/patents_X.pickle", "wb")
-    Ys = []; y_file = open("../data/preprocessed/patents_Y.pickle", "wb")
-    # sparray((len(gt_filepaths), len(sorted_classes)+1))
-    for i, (blocks, gt_blocks) in enumerate(zip(blocks_list, gt_blocks_list)):
-        X = build_ghega_x(blocks, img_shape, w2v, scaling_factor=scaling_factor)
-        X_bag = {}
-        Y = np.zeros((len(sorted_classes)+1))
-        ROI_neg = sparray((h, w, 1))
-        for x in range(w):
-            for y in range(h):
-                ROI_neg[y,x] = 1
-
-
-
-        for gt_block in gt_blocks:
-            if gt_block['label_exists']:
-                ROI_l = sparray((h, w, 1))
-                l_x, l_y, l_w, l_h = gt_block['label_x'], gt_block['label_y'], gt_block['label_w'], gt_block['label_h']
-                l_x, l_y, l_w, l_h = int(round(scaling_factor*l_x)), int(round(scaling_factor*l_y)), int(round(scaling_factor*l_w)), int(round(scaling_factor*l_h))
-                # mark "region-of-interest" as 1, negative ROI as 0
-                for x in range(l_x, l_x+l_w+1):
-                    for y in range(l_y, l_y+l_h+1):
-                        ROI_l[y,x] = 1
-                        ROI_neg[y,x] = 0
-                #X_l = (X, ROI_l)
-                X_l = np.c_[X.dense(), ROI_l.dense()]
-                Y_l = Y.copy()
-                Y_l[sorted_classes.index(gt_block['element_type'].lower()+'_label')] = 1
-
-                yield X_l
-                #pickle.dump(X_l, x_file)# Xs.append(nparray_to_sparray_3d(X_l))
-                #pickle.dump(Y_l, y_file)# Ys.append(Y_l)
-
-            if gt_block['value_text']:
-                ROI_v = sparray((h, w, 1))
-                v_x, v_y, v_w, v_h = gt_block['value_x'], gt_block['value_y'], gt_block['value_w'], gt_block['value_h']
-                v_x, v_y, v_w, v_h = int(round(scaling_factor*v_x)), int(round(scaling_factor*v_y)), int(round(scaling_factor*v_w)), int(round(scaling_factor*v_h))
-                # mark "region-of-interest" as 1
-                for x in range(v_x, v_x+v_w+1):
-                    for y in range(v_y, v_y+v_h+1):
-                        ROI_v[y,x] = 1
-                        ROI_neg[y,x] = 1
-                #X_v = (X, ROI_v)
-                X_v = np.c_[X.dense(), ROI_v.dense()]
-                Y_v = Y.copy()
-                Y_v[sorted_classes.index(gt_block['element_type'].lower()+'_value')] = 1
-
-                yield X_v
-                #pickle.dump(X_v, x_file) #Xs.append(nparray_to_sparray_3d(X_v))
-                #pickle.dump(Y_v, y_file) #Ys.append(Y_v)
-
-        #X_neg = (X, ROI_neg) 
-        X_neg = np.c_[X.dense(), ROI_neg.dense()]
-        Y_neg = Y.copy()
-        Y_neg[-1] = 1
-
-        yield X_neg
-        #pickle.dump(X_neg, x_file) #Xs.append(nparray_to_sparray_3d(X_neg))
-        #pickle.dump(Y_neg, y_file) #Ys.append(Y_neg)
-
-
-def build_ghega_Y(img_filepaths, gt_filepaths, w2v, scaling_factor=1.0):
-    gt_blocks_list, blocks_list, clustered_blocks_list = [], [], []
-    for i, (img_fp, gt_fp) in enumerate(zip(img_filepaths, gt_filepaths)):
-        print('\n\nProcessing {} ({} of {})'.format(img_fp, i+1, len(img_filepaths)))
-        
-        blocks = import_blocks(None, img_filepath=img_fp)
-        params = CUSTOM_PARAMS[0]
-        eps, (h,v,d), sep = get_clustered_blocks(blocks[:], (eps, (h,v,d), sep))
-        blocks_list += [clustered_blocks]
-
-        for eps, (h,v,d), sep in CUSTOM_PARAMS[1:]:
-            clustered_blocks = get_clustered_blocks(clustered_blocks, (eps, (h,v,d), sep))
-            clustered_blocks_list += [clustered_blocks]
-
-        gt_blocks_list += [import_groundtruth(gt_fp)]
-    sorted_classes = build_gt_classes(gt_blocks_list)
-
-
-
-    img_shape = w, h = PIL.Image.open(img_filepaths[0]).size 
-    w, h = int(round(scaling_factor*w)), int(round(scaling_factor*h))
-
-    Xs = []; x_file = open("../data/preprocessed/patents_X.pickle", "wb")
-    Ys = []; y_file = open("../data/preprocessed/patents_Y.pickle", "wb")
-    # sparray((len(gt_filepaths), len(sorted_classes)+1))
-    for i, (blocks, gt_blocks) in enumerate(zip(blocks_list, gt_blocks_list)):
-        X = build_ghega_x(blocks, img_shape, w2v, scaling_factor=scaling_factor)
-        X_bag = {}
-        Y = np.zeros((len(sorted_classes)+1))
-        ROI_neg = sparray((h, w, 1))
-        for x in range(w):
-            for y in range(h):
-                ROI_neg[y,x] = 1
-
-
-
-        for gt_block in gt_blocks:
-            if gt_block['label_exists']:
-                ROI_l = sparray((h, w, 1))
-                l_x, l_y, l_w, l_h = gt_block['label_x'], gt_block['label_y'], gt_block['label_w'], gt_block['label_h']
-                l_x, l_y, l_w, l_h = int(round(scaling_factor*l_x)), int(round(scaling_factor*l_y)), int(round(scaling_factor*l_w)), int(round(scaling_factor*l_h))
-                # mark "region-of-interest" as 1, negative ROI as 0
-                for x in range(l_x, l_x+l_w+1):
-                    for y in range(l_y, l_y+l_h+1):
-                        ROI_l[y,x] = 1
-                        ROI_neg[y,x] = 0
-                #X_l = (X, ROI_l)
-                X_l = np.c_[X.dense(), ROI_l.dense()]
-                Y_l = Y.copy()
-                Y_l[sorted_classes.index(gt_block['element_type'].lower()+'_label')] = 1
-
-                #yield X_l
-                yield Y_l
-                #pickle.dump(X_l, x_file)# Xs.append(nparray_to_sparray_3d(X_l))
-                #pickle.dump(Y_l, y_file)# Ys.append(Y_l)
-
-            if gt_block['value_text']:
-                ROI_v = sparray((h, w, 1))
-                v_x, v_y, v_w, v_h = gt_block['value_x'], gt_block['value_y'], gt_block['value_w'], gt_block['value_h']
-                v_x, v_y, v_w, v_h = int(round(scaling_factor*v_x)), int(round(scaling_factor*v_y)), int(round(scaling_factor*v_w)), int(round(scaling_factor*v_h))
-                # mark "region-of-interest" as 1
-                for x in range(v_x, v_x+v_w+1):
-                    for y in range(v_y, v_y+v_h+1):
-                        ROI_v[y,x] = 1
-                        ROI_neg[y,x] = 1
-                #X_v = (X, ROI_v)
-                X_v = np.c_[X.dense(), ROI_v.dense()]
-                Y_v = Y.copy()
-                Y_v[sorted_classes.index(gt_block['element_type'].lower()+'_value')] = 1
-
-                #yield X_v
-                yield Y_v
-                #pickle.dump(X_v, x_file) #Xs.append(nparray_to_sparray_3d(X_v))
-                #pickle.dump(Y_v, y_file) #Ys.append(Y_v)
-
-        #X_neg = (X, ROI_neg) 
-        X_neg = np.c_[X.dense(), ROI_neg.dense()]
-        Y_neg = Y.copy()
-        Y_neg[-1] = 1
-
-        #yield X_neg
-        yield Y_neg
-        #pickle.dump(X_neg, x_file) #Xs.append(nparray_to_sparray_3d(X_neg))
-        #pickle.dump(Y_neg, y_file) #Ys.append(Y_neg)
-
-
-
-
-
+##################
+# WORD2VEC MODEL #
+##################
 from gensim.models.word2vec import Word2Vec
 W2V_DIM = 100
 def build_word2vec_model(blocks_filepaths):
@@ -1006,211 +870,14 @@ def get_ghega_blocks_files(datasheets_or_patents):
 def get_ghega_gt_files(datasheets_or_patents):
     dir_path = '../ghega-dataset/{}'.format(datasheets_or_patents)
     return get_files(dir_path, '*.groundtruth.csv')
-    
-
-iii = -1
-def nparray_to_sparray_3d(arr):
-    global iii
-    iii += 1
-    print("Converting array {}".format(iii))
-    sparr = sparray(arr.shape)
-    for i in range(arr.shape[0]):
-        for j in range(arr.shape[1]):
-            for k in range(arr.shape[2]):
-                if arr[i,j,k] != 0:
-                    sparr[i,j,k] = arr[i,j,k]
-    return sparr
 
 
 
-def process_ghega_data(b, e):
-    img_filepaths = sorted(get_ghega_img_files('patents'))
-    blocks_filepaths = sorted(get_ghega_blocks_files('patents'))
-    gt_filepaths = sorted(get_ghega_gt_files('patents'))
-
-    w2v_model = load_word2vec_model('../models/w2v.model')
-    return build_ghega_X(img_filepaths[b:e], gt_filepaths[b:e], w2v_model.wv, scaling_factor=0.1), build_ghega_Y(img_filepaths[b:e], gt_filepaths[b:e], w2v_model.wv, scaling_factor=0.1)
-
-
-
-def main():
-    MyApp().run()
-
-
-if __name__ == "__main__":
-    main()
-
-
-
-
-
-
-def extract_features_(blocks):
-    for block in blocks:
-        label_words = []
-        if block['label_exists']:
-            feature_name = block['element_type'].lower() + '_label'
-            feature_dict[feature_name] = label_words = block['label_text'].lower().split()
-        feature_name = block['element_type'].lower() + '_value'
-        feature_dict[feature_name] = value_words = block['value_text'].lower().split()
-        feature_dict['words'] = set(value_words).union(label_words)
-    return feature_dict
-
-def get_tesseract_analysis(img_filepath):
-    # cache filepath
-    img_filename = img_filepath.split('/')[-1]
-    cache_filename = img_filename + '.tesseract-la'
-    cache_filepath = TESSERACT_CACHE_DIR + '/' + cache_filename
-
-    if os.path.exists(cache_filepath):
-        print('Found {} in cache!'.format(cache_filepath))
-        with open(cache_filepath, 'r') as cache_file:
-            res = cache_file.read()
-    else:
-        print("Running pytesseract layout analysis for {}...".format(img_filepath))
-        img = PIL.Image.open(img_filepath)
-        res = pytesseract.image_to_data(img, config='--psm 1 tsv', lang='eng')
-
-        with open(cache_filepath, 'w') as cache_file:
-            cache_file.write(res)
-    res = unicode(res)
-    return io.StringIO(res)
-
-def find_matching_gt_block(block, gt_blocks):
-    b1 = block['x'], block['y'], block['x']+block['w'], block['y']+block['h']
-    print('\n\n>>>>>')
-    print(block['texts'])
-    for gt_block in gt_blocks:
-        if gt_block['label_exists']:
-            gt_block_label = {}
-            gt_block_label['element_type'] = gt_block['element_type']
-            gt_block_label['block_type'] = 'label'
-            gt_block_label['x'] = gt_block['label_x']
-            gt_block_label['y'] = gt_block['label_y']
-            gt_block_label['w'] = gt_block['label_w']
-            gt_block_label['h'] = gt_block['label_h']
-            gt_block_label['text'] = gt_block['label_text']
-            gt_block_label['words'] = set([word.lower() for word in gt_block_label['text'].split()])
-            b2 = gt_block_label['x'], gt_block_label['y'], gt_block_label['x']+gt_block_label['w'], gt_block_label['y']+gt_block_label['h']
-            #print(gt_block_label['words'])
-            if all([any([label_word in text for sub_block in block['texts'] for text in sub_block]) for label_word in gt_block_label['words']]):
-                return gt_block_label
-        gt_block_value = {}
-        gt_block_value['element_type'] = gt_block['element_type']
-        gt_block_value['block_type'] = 'value'
-        gt_block_value['x'] = gt_block['value_x']
-        gt_block_value['y'] = gt_block['value_y']
-        gt_block_value['w'] = gt_block['value_w']
-        gt_block_value['h'] = gt_block['value_h']
-        gt_block_value['text'] = gt_block['value_text']
-        gt_block_value['words'] = set([word.lower() for word in gt_block_label['text'].split()])
-        b2 = gt_block_value['x'], gt_block_value['y'], gt_block_value['x']+gt_block_value['w'], gt_block_value['y']+gt_block_value['h']
-        #print(gt_block_value['words'])
-        if all([any([value_word in text for sub_block in block['texts'] for text in sub_block]) for value_word in gt_block_value['words']]):
-            return gt_block_value
-    return None
-
-
-# features[word_1]:
-#   hAlign_word_2
-#   sameBlock_word_2
-#   len_line
-#   len_block
-def process_tesseract_analysis(tsv, gt_blocks, vAlignThresh=15):
-    word_dicts = read_csv(tsv, sep='\t', header=0).T.to_dict().values()
-    words = set()
-    prev_word_num = -1
-    prev_line_num = -1
-    prev_block_num = -1
-    line = []
-    block = []
-    line_blocks = []
-    line_clusters = []
-    text_blocks = []
-    clustered_blocks = []
-
-    features = {}
-    # iterate over word blocks
-    for i, word_dict in enumerate(word_dicts):
-
-        # if block is textual
-        if word_dict['text']:
-            if str(word_dict['text']).lower() == 'nan':
-                continue
-            word_dict['w'] = int(word_dict['width'])
-            word_dict['h'] = int(word_dict['height'])
-            word_dict['x'] = int(word_dict['left'])
-            word_dict['y'] = int(word_dict['top'])
-            word_dict['texts'] = [[word_dict['text'].lower()]]
-            text_blocks += [word_dict]
-
-            word = word_dict['text'] = word_dict['text'].lower()
-            features[word] = {}
-            features[word]['w'] = word_dict['w']
-            features[word]['h'] = word_dict['h']
-            features[word]['x'] = word_dict['x']
-            features[word]['y'] = word_dict['y']
-            words.add(word)
-
-            line_num = word_dict['line_num']
-            if line_num == prev_line_num or prev_line_num == -1:
-                line += [word]
-                line_blocks += [word_dict]
-            if line_num != prev_line_num or i == len(word_dicts)-1:
-                # end of prev line
-                line_words = set(line)
-                for word_1 in line_words:
-                    for word_2 in line_words:
-                        if word_1 != word_2:
-                            features[word_1]['hAlign_'+word_2] = True
-                            features[word_2]['hAlign_'+word_1] = True
-                    features[word_1]['line_len'] = len(line)
-
-                if line_blocks:
-                    clustered_line = line_blocks[0]
-                    for word_block in line_blocks[1:]:
-                        clustered_line = combine_blocks(clustered_line, word_block, horizontal=True, sep=' ')
-                    line_clusters += [clustered_line]
-                    line = []
-                    line_blocks = []
-            prev_line_num = line_num
-
-            block_num = word_dict['block_num']
-            if block_num == prev_block_num or prev_block_num == -1:
-                block += [word]
-            if block_num != prev_block_num or i == len(word_dicts)-1:
-                # end of prev block
-                
-                if line_clusters:
-                    clustered_block = line_clusters[0]
-                    for clustered_line in line_clusters[1:]:
-                        clustered_block = combine_blocks(clustered_block, clustered_line, vertical=True, sep='\n')
-
-                    clustered_block_words = set(block)
-                    for word_1 in clustered_block_words:
-                        for word_2 in clustered_block_words:
-                            if word_1 != word_2:
-                                features[word_1]['sameBlock_'+word_2] = True
-                                features[word_2]['sameBlock_'+word_1] = True
-                        features[word_1]['block_len'] = len(block)
-
-                clustered_blocks += [clustered_block]
-                block = []
-                line_clusters = []
-            prev_block_num = block_num
-
-    for w_1, word_1 in features.iteritems():
-        x_1 = word_1['x']+word_1['w']/2
-        for w_2, word_2 in features.iteritems():
-            if w_1 != w_2:
-                x_2 = word_2['x']+word_2['w']/2
-                if abs(x_1 - x_2) < vAlignThresh:
-                    features[w_1]['vAlign_'+w_2] = True
-                    features[w_2]['vAlign_'+w_1] = True
-    return features
-
+######################
+# FEATURE GENERATION #
+######################
 from collections import defaultdict
-def get_clusters(blocks, clustered_blocks):
+def get_spatial_clusters(blocks, clustered_blocks):
     clusters = defaultdict(set)
     cluster_of_block = {}
     for block in blocks:
@@ -1233,184 +900,419 @@ def is_numeric(text):
         return False
 
 def is_alphanumeric(text):
-    return all(c in ALPHABET or c in NUMERALS for c in text)
+    return any(c in ALPHABET for c in text) and any(c in NUMERALS for c in text) and all(c in ALPHABET or c in NUMERALS for c in text)
+
+def get_all_nltk_stopwords():
+    from nltk.corpus import stopwords
+    all_stopwords = set()
+    for language in stopwords.fileids():
+        all_stopwords.update(stopwords.words(language))
+    return all_stopwords
+STOPWORDS = get_all_nltk_stopwords()
+
+    
+# taken from https://stackoverflow.com/questions/27889873/clustering-text-documents-using-scikit-learn-kmeans-in-python#27890107
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.cluster import KMeans
+def get_document_clusters(documents, n_clusters=50):
+    vectorizer = TfidfVectorizer(stop_words=STOPWORDS)
+    X = vectorizer.fit_transform(documents)
+    model = KMeans(n_clusters=n_clusters, init='k-means++', max_iter=100, n_init=10)
+    return model.fit(X), vectorizer
+
+def predict_document_cluster(model, vectorizer, document):
+    return model.predict(vectorizer.transform(document))
 
 VALIGN_THRESH = 10
-def process_blocks(blocks, gt_blocks, clustered_blocks, vAlignThresh=15):
-    for block in blocks:
-        block['text'] = clean_sentence(block['text'])
-        block['texts'] = [[block['text']]]
-    clusters, cluster_of_block = get_clusters(blocks, clustered_blocks)
+HALIGN_THRESH = 10
+def process_blocks(blocks, gt_blocks, clustered_blocks, kmeans=(None, None), vocab=set()):
+
+    # cluster blocks spatially (DBSCAN)
+    clusters, cluster_of_block = get_spatial_clusters(blocks, clustered_blocks)
+    
+    # get document clusters
+    kmeans_model, kmeans_vectorizer = kmeans
+
     features = []
+    labels = []
     for block in blocks:
-        block_features = {'text':None, 'block_type':None, 'element_type':None, 'hAlign':set(), 'vAlign':set(), 'sameCluster':set(), 'num_words':None, 'num_chars':None}
-        block_features['text'] = text = block['text']
+        block_features = {}
+
+        # textual features
+        text = block['text']
         block_features['num_words'] = len(text.split())
         block_features['num_chars'] = len(text)
-        block_features['is_text'] = is_text(text)
-        block_features['is_num'] = is_numeric(text)
-        block_features['is_alphanumeric'] = is_alphanumeric(text)
-        for gt_block in gt_blocks:
-            if gt_block['label_exists']:
-                if block['text'] == gt_block['label_text']:
-                    block_features['block_type'] = 'label'
-                    block_features['element_type'] = gt_block['element_type']
-            if block['text'] == gt_block['value_text']:
-                block_features['block_type'] = 'value'
-                block_features['element_type'] = gt_block['element_type']
+        block_features['is_text'] = int(is_text(text))
+        block_features['is_num'] = int(is_numeric(text))
+        block_features['is_alphanumeric'] = int(is_alphanumeric(text))
+        block_features['cluster'] = predict_document_cluster(kmeans_model, kmeans_vectorizer, [text])[0]
+        
+        # shape+location features
+        x_1 = block['x']
+        y_1 = block['y']
+        block_features['w'] = w_1 = block['w']
+        block_features['h'] = h_1 = block['h']
+        block_features['x'] = x_1 + w_1/2
+        block_features['y'] = y_1 + h_1/2
+
+        # inter-block features
         for block_ in blocks:
+            r_1, b_1 = x_1+w_1, y_1+h_1
+            b1 = x_1, y_1, r_1, b_1
+
+            x_2, y_2, w_2, h_2 = block_['x'], block_['y'], block_['w'], block_['h']
+            r_2, b_2 = x_2+w_2, y_2+h_2
+            b2 = x_2, y_2, r_2, b_2
+
             # hAlign
-            if blocks_v_overlap(b1, b2):
-                hAlign_words = set([word for sub_block in block_['texts'] for line in sub_block for word in line.split()])
-                block_features['hAlign'].update(hAlign_words)
+            if abs((y_1+h_1/2) - (y_2+h_2/2)) < HALIGN_THRESH or abs(y_1 - y_2) < HALIGN_THRESH or abs((y_1+h_1) - (y_2+h_2)) < HALIGN_THRESH: # if center aligned, or top aligned, or bottom aligned
+                hAlign_words = set([word for sub_block in block_['texts'] for line in sub_block for word in line.split() if word not in STOPWORDS and (not vocab or (vocab and word in vocab))])
+                for word in hAlign_words:
+                    block_features['hAlign_'+word] = 1
 
             # vAlign
-            b1 = x_1,_,w_1,_ = block['x'], block['y'], block['x']+block['w'], block['y']+block['h']
-            b2 = x_2,_,w_2,_ = block_['x'], block_['y'], block_['x']+block_['w'], block_['y']+block_['h']
-            if abs(x_1 - x_2) < VALIGN_THRESH or abs((x_1+w_1) - (x_2+w_2)) < VALIGN_THRESH:
-                    vAlign_words = set([word for sub_block in block_['texts'] for line in sub_block for word in line.split()])
-                    block_features['vAlign'].update(vAlign_words)
+            if abs((y_1+h_1/2) - (y_2+h_2/2)) < VALIGN_THRESH or abs(x_1 - x_2) < VALIGN_THRESH or abs((x_1+w_1) - (x_2+w_2)) < VALIGN_THRESH: # if center aligned, or left aligned, or right aligned
+                vAlign_words = set([word for sub_block in block_['texts'] for line in sub_block for word in line.split() if word not in STOPWORDS and (not vocab or (vocab and word in vocab))])
+                for word in vAlign_words:
+                    block_features['vAlign_'+word] = 1
 
-            # sameCluster
+            # cluster features
             if cluster_of_block[b1] == cluster_of_block[b2]:
-                cluster_words = set([word for sub_block in block_['texts'] for line in sub_block for word in line.split()])
-                block_features['sameCluster'].update(cluster_words)
+                cluster_words = set([word for sub_block in block_['texts'] for line in sub_block for word in line.split() if word not in STOPWORDS and (not vocab or (vocab and word in vocab))])
+                for word in cluster_words:
+                    # sameCluster
+                    block_features['sameCluster_'+word] = 1
+
+                    # vecTo
+                    vec_x, vec_y = x_2-x_1, y_2-y_1
+                    normalizing_factor = sqrt(vec_x**2 + vec_y**2)
+                    vec_x_normalized, vec_y_normalized = vec_x*normalizing_factor, vec_y*normalizing_factor
+                    block_features['vecTo_'+word+'_x'] = vec_x_normalized
+                    block_features['vecTo_'+word+'_y'] = vec_y_normalized
         features += [block_features]
-    return features
 
 
+        # groundtruth labels
+        block_type = None
+        element_type = None
+        if gt_blocks:
+            groundtruth = {}
+            for gt_block in gt_blocks:
+                if gt_block['label_exists']:
+                    if block['text'] == gt_block['label_text']:
+                        block_type = 'label'
+                        element_type = gt_block['element_type']
+                if block['text'] == gt_block['value_text']:
+                    block_type = 'value'
+                    element_type = gt_block['element_type']
+        label = element_type+'_'+block_type if block_type and element_type else ''
+        labels += [ { label : 1 } ]
 
-def process_ghega_data_2(l=None):
-    img_filepaths = sorted(get_ghega_img_files('patents'))
-    blocks_filepaths = sorted(get_ghega_blocks_files('patents'))
-    gt_filepaths = sorted(get_ghega_gt_files('patents'))
+    return features, labels
+
+
+def get_top_words(blocks, k=1000):
+    count_dict = defaultdict(int)
+    for block in blocks:
+        for word in block['text'].split():
+            count_dict[word] += 1
+    sorted_words = sorted(count_dict.keys(), key=lambda k: count_dict[k], reverse=True)
+    return sorted_words[:k]
+
+
+def process_ghega_data(patents_or_datasheets, l=None):
+    img_filepaths = sorted(get_ghega_img_files(patents_or_datasheets))
+    blocks_filepaths = sorted(get_ghega_blocks_files(patents_or_datasheets))
+    gt_filepaths = sorted(get_ghega_gt_files(patents_or_datasheets))
+    params = get_DBSCAN_params(patents_or_datasheets)
+
+    blocks_list = [import_blocks(blocks_fp) for blocks_fp in blocks_filepaths[:l]]
+    gt_blocks_list = [import_groundtruth(gt_fp) for gt_fp in gt_filepaths[:l]]
+
+    # cluster docs by content
+    documents = [block['text'] for blocks in blocks_list for block in blocks]
+    kmeans_docs = get_document_clusters(documents)
+
+    # get top words
+    top_words = set(get_top_words([block for blocks in blocks_list for block in blocks]))
 
     feature_list = []
-    feature_labels = set()
+    label_list = []
     gt_labels = set()
-    for blocks_fp, gt_fp in zip(blocks_filepaths[:l], gt_filepaths[:l]):
-        blocks = import_blocks(blocks_fp)
-        gt_blocks = import_groundtruth(gt_fp)
+    for i, (blocks, gt_blocks) in enumerate(zip(blocks_list, gt_blocks_list)):
+        print('Processing {}... ({} of {})'.format(''.join(blocks_filepaths[i].split('.')[:-2]), i, len(blocks_filepaths)))
+        clustered_blocks = get_clustered_blocks(blocks[:], params)
 
-        clustered_blocks = get_clustered_blocks(blocks[:], CUSTOM_PARAMS[1:])
-
-        features = process_blocks(blocks, gt_blocks, clustered_blocks[-1])
-        feature_list += [features]
-    return feature_list
+        features, labels = process_blocks(blocks, gt_blocks, clustered_blocks[-1], kmeans=kmeans_docs, vocab=top_words)
+        feature_list += features
+        label_list += labels
+    return feature_list, label_list
     
 
+from sklearn.feature_extraction import DictVectorizer
+def vectorize(feature_or_label_list):
+    vectorizer = DictVectorizer(sparse=True)
+    return vectorizer.fit_transform(feature_or_label_list), vectorizer.get_feature_names()
 
+from scipy.stats import entropy
+def select_features(X, Y):
+    count_f = np.zeros((X.shape[1], 2), dtype=float)
+    count_l = np.zeros((Y.shape[1]), dtype=float)
+    count_joint = np.zeros((X.shape[1], 2, Y.shape[1]), dtype=float)
+    for i, (x, y) in enumerate(zip(X,Y)):
+        if i % 100 == 0:
+            print('{} of {}'.format(i, X.shape[0]))
+        count_f[:,0] += 1 # assume f_j is 0, correct later (need to do this because of sparse representation of X)
+        for (_, i), f in x.todok().iteritems():
+            if f:
+                count_f[i,0] -= 1
+                count_f[i,1] += 1
 
-# old stuff
-'''
-def get_clustered_blocks_scored(blocks):
-    blocks_d = {i:block for i, block in enumerate(blocks)}
-    scores = {i:get_block_score(block) for i, block in blocks_d.iteritems()}
-    block_min_score = {i:(set([i]), score, blocks_d[i]) for i, score in scores.iteritems()}
-    combined_blocks = {}
+        for (_, i), l in y.todok().iteritems():
+            if l:
+                count_l[i] += 1
 
-    clustered_blocks = []
-    prev_blocks = block_min_score.values()
-    print('starting with {} blocks'.format(len(prev_blocks)))
-
-    while True:
-        pair_indexes = None
-        combined_info = None  
-        next_blocks = []      
-        for i, (cluster_i, score_i, block_i) in enumerate(prev_blocks):
-            for j, (cluster_j, score_j, block_j) in enumerate(prev_blocks):
-                if i < 2:
-                    combined_block = combine_blocks(block_i, block_j)
-                    combined_score = get_block_score(combined_block)
-                    if combined_score < score_i + score_j:
-                        progress = True
-                        combined_cluster = cluster_i.union(cluster_j)
-                        pair_indexes = (i, j)
-                        combined_info = (combined_cluster, combined_score, combined_block)
-                        break
-            if pair_indexes:
-                break
-        if not pair_indexes:
-            for _, score, block in prev_blocks:
-                block['score'] = score
-                clustered_blocks.append(block)
-            break
-        i, j = pair_indexes
-        next_blocks = [combined_info] + [block_info for k, block_info in enumerate(prev_blocks) if k not in pair_indexes]
-        prev_blocks = next_blocks
-        print('now {} blocks'.format(len(prev_blocks)))
-
-    return clustered_blocks
-
-
-def get_block_score(block, k=2, q=0.5, p=2, C=2*10**4, cache={}):
-    w, h = block['w'], block['h']
-
-    if (w,h) in cache:
-        return cache[(w,h)]
-
-    perimeter = 2*w + 2*h
-    area = w*h
-    score = area**q + perimeter**k + C
-    # TODO: try making vertical space more costly than horizontal space
-
-    cache[(w,h)] = score
-    return score
-
-
-def get_clustered_blocks_top_down(blocks):
-    # combine blocks into single cluster
-    document_cluster_block = blocks[0]
-    for block in blocks[1:]:
-        document_cluster_block = combine_blocks(document_cluster_block, block)
-    document_cluster_block_ids = set(range(len(blocks)))
-    clusters = [document_cluster_block_ids]
-
-    document_cluster_density = get_cluster_density(document_cluster_block, document_cluster_block_ids, blocks)
-
-def get_cluster_density(cluster_block, cluster_block_ids, blocks):
+        count_joint[:][0] += 1 # assume f_j is 0, correct later (need to do this because of sparse representation of X)
+        for (_, i), f in x.todok().iteritems():
+            for (_, j), l in y.todok().iteritems():
+                if f and l:
+                    count_joint[i,0,j] -= 1
+                    count_joint[i,1,j] += 1
     
-    cluster_area = cluster_block['w'] * cluster_block['h']
+    f_counts = np.array([f[0]+f[1] for f in count_f])
+    total_l_count = sum(count_l)
+    total_joint_count = sum(count_joint)
+
+    p_f = count_f / np.vstack((f_counts, f_counts)).T
+    p_l = count_l / total_l_count
+    p_joint = count_joint / total_joint_count
+
+    S = np.zeros(p_f.shape[0])
+    for i, f_dist in enumerate(p_f):
+        p_fl = np.multiply(f_dist.reshape((-1,1)), p_l.reshape((1, -1)))
+        p_joint_f = p_joint[i]
+        p_fl += 1e-5
+        p_joint_f += 1e-5
+        S[i] = sum(entropy(p_fl, qk=p_joint_f))
+    return S
+
+from sklearn import preprocessing
+def prepare_labels(label_list):
+    labels = set()
+    for label in label_list:
+        labels.update(label.keys())
+    sorted_labels = sorted(labels)
+
+    le = preprocessing.LabelEncoder()
+    le.fit(sorted_labels)
+    Y = np.array([le.transform(label.keys())[0] for label in label_list])
+    return Y, sorted_labels
+
+def get_ghega_train(patents_or_datasheets):
+    feature_list, label_list = process_ghega_data(patents_or_datasheets)
+
+    X, feature_names = vectorize(feature_list)
+    Y, label_names = prepare_labels(label_list)
+
+    return (X, Y), (feature_names, label_names)
+
+import sklearn.model_selection as ms
+
+
+#######################
+# LEARNING ALGORITHMS #
+#######################
+
+# Decision Trees
+from sklearn.tree import DecisionTreeClassifier
+def train_DT(depth, X, Y, classifier_results=[]):
+    X_train, X_test, y_train, y_test = ms.train_test_split(X, Y, test_size=0.1)
+
+    dt_model = DecisionTreeClassifier(max_depth=depth)
+    dt_model.fit(X_train, y_train)
+    y_pred_test = dt_model.predict(X_test)
+    train_score = dt_model.score(X_train, y_train)
+    test_score = dt_model.score(X_test, y_test)
+
+    classifier_results.append({'Classifier': 'DecTree',
+                               'Depth': depth,
+                               'Score': test_score})
+    return dt_model, train_score, test_score
+
+# kNN
+from sklearn.neighbors import KNeighborsClassifier
+def train_kNN(k, X, Y, classifier_results=[]):
+    X_train, X_test, y_train, y_test = ms.train_test_split(X, Y, test_size=0.1)
     
-    blocks_area_sum = 0
-    for block_id, block in enumerate(blocks):
-        if block_id in cluster_block_ids:
-            blocks_area_sum += blocks[block_id]['w'] * blocks[block_id]['h']
+    knn_model = KNeighborsClassifier(n_neighbors=k, algorithm='ball_tree')
+    knn_model.fit(X_train, y_train)
+    y_pred_test = knn_model.predict(X_test)
+    train_score = knn_model.score(X_train, y_train)
+    test_score = knn_model.score(X_test, y_test)
 
-    return blocks_area_sum / cluster_area
+    classifier_results.append({'Classifier': 'kNN', 'k':k, 'Score': test_score})
+    return knn_model, train_score, test_score
+
+# Logistic Regression
+from sklearn.linear_model import LogisticRegression
+def train_LR(penalty, X, Y, classifier_results=[]):
+    X_train, X_test, y_train, y_test = ms.train_test_split(X, Y, test_size=0.1)
+
+    lr_model = LogisticRegression(solver='liblinear', penalty=penalty)
+    lr_model.fit(X_train, y_train)
+    y_pred_test = lr_model.predict(X_test)
+    train_score = lr_model.score(X_train, y_train)
+    test_score = lr_model.score(X_test, y_test)
     
-def get_clustered_blocks_horizontal(blocks):
-    pass
+    classifier_results.append({'Classifier': 'LogReg-{}'.format(penalty.upper()), 'Score': test_score})
+    return lr_model, train_score, test_score
+
+# SVM
+from sklearn.svm import SVC
+def train_SVM(X, Y, classifier_results=[]):
+    X_train, X_test, y_train, y_test = ms.train_test_split(X, Y, test_size=0.1)
+
+    svm_model = SVC()
+    svm_model.fit(X_train, y_train)
+    y_pred_test = svm_model.predict(X_test)
+    train_score = svm_model.score(X_train, y_train)
+    test_score = svm_model.score(X_test, y_test)
+    
+    classifier_results.append({'Classifier': 'SVM', 'Score': test_score})
+    return svm_model, train_score, test_score
+
+# RF
+from sklearn.ensemble import RandomForestClassifier
+def train_RF(n_estimators, X, Y, classifier_results=[]):
+    X_train, X_test, y_train, y_test = ms.train_test_split(X, Y, test_size=0.1)
+
+    rfc_model = RandomForestClassifier(n_estimators=n_estimators)
+    rfc_model.fit(X_train, y_train)
+    y_pred_test = rfc_model.predict(X_test)
+    train_score = rfc_model.score(X_train, y_train)
+    test_score = rfc_model.score(X_test, y_test)
+
+    classifier_results.append({'Classifier': 'RandomForest', 'Count': n_estimators, 'Score': test_score})
+    return rfc_model, train_score, test_score
+
+# Bagging
+from sklearn.ensemble import BaggingClassifier
+def train_bagging(base_estimator, label, n_estimators, X, Y, classifier_results=[]):
+    X_train, X_test, y_train, y_test = ms.train_test_split(X, Y, test_size=0.1)
+
+    bag_model = BaggingClassifier(base_estimator=base_estimator, n_estimators=n_estimators)
+    bag_model.fit(X_train, y_train)
+    y_pred_test = bag_model.predict(X_test)
+    train_score = bag_model.score(X_train, y_train)
+    test_score = bag_model.score(X_test, y_test)
+    
+    classifier_results.append({'Classifier': 'Bag-{}'.format(label), 'Count': n_estimators, 'Score': test_score})
+    return bag_model, train_score, test_score
+
+# Boosting
+from sklearn.ensemble import AdaBoostClassifier
+def train_boosting(base_estimator, label, n_estimators, X, Y, classifier_results=[]):
+    X_train, X_test, y_train, y_test = ms.train_test_split(X, Y, test_size=0.1)
+
+    boost_model = AdaBoostClassifier(base_estimator=base_estimator, algorithm='SAMME', n_estimators=n_estimators)
+    boost_model.fit(X_train, y_train)
+    y_pred_test = boost_model.predict(X_test)
+    train_score = boost_model.score(X_train, y_train)
+    test_score = boost_model.score(X_test, y_test)
+    
+    classifier_results.append({'Classifier': 'Boost-{}'.format(label), 'Count': n_estimators, 'Score': test_score})
+    return boost_model, train_score, test_score
+
+# Neural Network
+from sklearn.neural_network import MLPClassifier
+def train_DNN(hidden, X, Y, classifier_results=[]):
+    X_train, X_test, y_train, y_test = ms.train_test_split(X, Y, test_size=0.1)
+
+    mlp_model = MLPClassifier(hidden)
+    mlp_model.fit(X_train, y_train)
+    y_pred_test = mlp_model.predict(X_test)
+    train_score = mlp_model.score(X_train, y_train)
+    test_score = mlp_model.score(X_test, y_test)
+
+    classifier_results.append({'Classifier': 'DNN', 'Hidden': hidden, 'Score': test_score})
+    return mlp_model, train_score, test_score
 
 
-def get_clustered_blocks_nearby(blocks):
-    euclidean_distance = lambda (x1,y1),(x2,y2): sqrt((x2-x1)**2 + (y2-y1)**2)
-    closest_block = {}
-    closest_block_dist = {}
-    for i, block_i in enumerate(blocks):
-        l_i, t_i, w_i, h_i = block_i['x'], block_i['y'], block_i['w'], block_i['h']
-        r_i, b_i = l_i+w_i, t_i+h_i
-        x_i, y_i = l_i+w_i/2, t_i+h_i/2
+def train_all_models(X, Y):
+    classifier_results = []
+    '''
+    print('Training DT models...')
+    depths = range(10,31,2)
+    for depth in depths:
+        dt_model, dt_train_score, dt_test_score = train_DT(depth, X, Y, classifier_results=classifier_results)
+        print('DT-{}_train_accuracy={}'.format(depth, dt_train_score))
+        print('DT-{}_test_accuracy={}'.format(depth, dt_test_score))
+    print('\n')
+    '''
+    print('Training kNN model...')
+    ks = [1, 5, 10, 15]
+    for k in ks:
+        knn_model, knn_train_score, knn_test_score = train_kNN(k, X, Y, classifier_results=classifier_results)
+        print('kNN-{}_train_accuracy={}'.format(k, knn_train_score))
+        print('kNN-{}_test_accuracy={}'.format(k, knn_test_score))
+    print('\n')
+    
+    print('Training LR models...')
+    penalties = ['l1', 'l2']
+    for penalty in penalties:
+        lr_model, lr_train_score, lr_test_score = train_LR(penalty, X, Y, classifier_results=classifier_results)
+        print('LR-{}_train_accuracy={}'.format(penalty, lr_train_score))
+        print('LR-{}_test_accuracy={}'.format(penalty, lr_test_score))
+    print('\n')
 
-        min_block = None
-        min_dist = 10**10
-        for j, block_j in enumerate(blocks):
-            l_j, t_j, w_j, h_j = block_j['x'], block_j['y'], block_j['w'], block_j['h']
-            r_j, b_j = l_j+w_j, t_j+h_j
-            x_j, y_j = l_j+w_j/2, t_j+h_j/2
+    print('Training SVM model...')
+    svm_model, svm_train_score, svm_test_score = train_SVM(X, Y, classifier_results=classifier_results)
+    print('SVM_train_accuracy={}'.format(svm_train_score))
+    print('SVM_test_accuracy={}'.format(svm_test_score))
+    print('\n')
 
-            center_dist = euclidean_distance((x_i,y_i), (x_j,y_j))
-            corners_dists = []
-            for corner_i in [(l_i, t_i), (l_i, b_i), (r_i, t_i), (r_i, b_i)]:
-                for corner_j in [(l_j, t_j), (l_j, b_j), (r_j, t_j), (r_j, b_j)]:
-                    corner_dists.append(euclidean_distance(corner_i, corner_j))
-            dist = min(center_dist, min(corner_dists))
+    print('Training DNN model...')
+    hidden = (20,10,5)
+    dnn_model, dnn_train_score, dnn_test_score = train_DNN(hidden, X, Y, classifier_results=classifier_results)
+    print('DNN-{}_train_accuracy={}'.format('-'.join([str(l) for l in hidden]), dnn_train_score))
+    print('DNN-{}_test_accuracy={}'.format('-'.join([str(l) for l in hidden]), dnn_test_score))
+    print('\n')
+    
 
-            if dist < min_dist:
-                min_dist = dist
-                min_block = j
+    n_estimators = 31
+    base_estimator, label = (DecisionTreeClassifier(), 'DecTree')
 
-        closest_block[i] = min_block
-        closest_block_dist[i] = min_dist
-'''
+    print('Training RF model...')
+    rfc_model, rfc_train_score, rfc_test_score = train_RF(n_estimators, X, Y, classifier_results=classifier_results)
+    print('RF_train_accuracy={}'.format(rfc_train_score))
+    print('RF_test_accuracy={}'.format(rfc_test_score))
+    print('\n')
+    
+    print('Training Bagging model...')
+    bag_model, bag_train_score, bag_test_score = train_bagging(base_estimator, label, n_estimators, X, Y, classifier_results=classifier_results)
+    print('Bag-{}_train_accuracy={}'.format(label, bag_train_score))
+    print('Bag-{}_test_accuracy={}'.format(label, bag_test_score))
+    print('\n')
+
+    print('Training Boosting model...')
+    boost_model, boost_train_score, boost_test_score = train_boosting(base_estimator, label, n_estimators, X, Y, classifier_results=classifier_results)
+    print('Boost-{}_train_accuracy={}'.format(label, bag_train_score))
+    print('Boost-{}_test_accuracy={}'.format(label, bag_test_score))
+    print('\n')
+    
+
+    return classifier_results
+
+def main():
+    MyApp().run()
+
+
+if __name__ == "__main__":
+    main()
+
+
+
+
+
+
 
