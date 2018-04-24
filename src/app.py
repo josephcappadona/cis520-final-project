@@ -18,8 +18,15 @@ MODELED_DOCUMENT_VIEW_SIZE = (750, 800)
 MODELED_DOCUMENT_VIEW_PADDING = 50
 CUSTOM_PARAMS = [(7, (True,False,False), ''), # link tokens to form words
                  (40, (True,False,False), ' '), # link tokens in line
-                 (25, (False,True,False), None)]
+                 (25, (False,True,False), None),
+                 (1, (True,True,True), None),
+                 (1, (True,True,True), None)]
 
+CUSTOM_PARAMS_2 = [(7, (True,False,False), ''), # link tokens to form words
+                 (200, (True,False,False), ' '), # link tokens in line
+                 (50, (False,True,False), None),
+                 (1, (True,True,True), None),
+                 (1, (True,True,True), None)]
 class AppImportError(ValueError):
     def __init__(self, msg):
         super(ValueError, self).__init__()
@@ -338,15 +345,17 @@ class ModeledDocument(Image):
             self.params = params if params else CUSTOM_PARAMS
             self.eps, self.hvd, self.seps = zip(*self.params)
             print('Iteratively finding block clusters...')
-            for (eps, (h,v,d), sep) in self.params:
-                clustered_blocks = get_clustered_blocks(clustered_blocks, eps=eps, horizontal=h, vertical=v, diag=d, sep=sep)
+            clustered_blocks = get_clustered_blocks(clustered_blocks, CUSTOM_PARAMS)
 
-                # resize data to fit image's new size in window
-                resized_cluster_blocks = []
-                for block in clustered_blocks:
+            # resize data to fit image's new size in window
+            resized_cluster_blocks = []
+            for cluster in clustered_blocks:
+                resized_cluster = []
+                for block in cluster:
                     resized_block = {k: (resize(v) if k in resize_fields else v) for k, v in block.iteritems()}
-                    resized_cluster_blocks.append(resized_block)
-                self.clustered_blocks.append(resized_cluster_blocks)
+                    resized_cluster.append(resized_block)
+                resized_cluster_blocks.append(resized_cluster)
+            self.clustered_blocks = resized_cluster_blocks
             print('')
 
             self.blocks_views.append(self.blocks)
@@ -463,7 +472,7 @@ class ModeledDocument(Image):
             value_coords = (l+x+w/2.0, t+y+h/2.0)
 
             if labels_coords:
-                self.draw_line(canvas, labels_coords, value_coords, rgb_=(0,0.75,0), pensize=2)
+                self.draw_line(canvas, labels_coords, value_coords, rgb_=(0,0.75,0), alpha=0.5, pensize=2)
 
 
     # DRAW STATIC METHODS
@@ -481,8 +490,8 @@ class ModeledDocument(Image):
         canvas.fill_stroke()
 
     @staticmethod
-    def draw_line(canvas, pt1, pt2, rgb_=(1,1,1), pensize=1):
-        canvas.pencolor = rgb(*rgb_, alpha=0.3)
+    def draw_line(canvas, pt1, pt2, rgb_=(1,1,1), alpha=1.0, pensize=1):
+        canvas.pencolor = rgb(*rgb_, alpha=alpha)
         canvas.pensize = pensize
         canvas.newpath()
         canvas.moveto(*pt1)
@@ -494,48 +503,54 @@ class ModeledDocument(Image):
 ########################
 ### BLOCK CLUSTERING ###
 ########################
-def get_clustered_blocks(blocks, eps=8, horizontal=False, vertical=False, diag=False, sep=None):
+def get_clustered_blocks(blocks, params):
     
     euclidean_distance = lambda (x1,y1),(x2,y2): sqrt((x2-x1)**2 + (y2-y1)**2)
-    def DBSCAN_dist(b1, b2):
-        if blocks_do_intersect(b1, b2) and vertical and horizontal:
-            return 0
-        elif blocks_h_overlap(b1, b2) and vertical:
-            _, t_1, _, b_1 = b1
-            _, t_2, _, b_2 = b2
-            if b_1 < t_2: # if b1 is closer to 0
-                return t_2 - b_1
+    def make_DBSCAN_dist(horizontal, vertical, diag):
+        def DBSCAN_dist(b1, b2):
+            if blocks_do_intersect(b1, b2) and vertical and horizontal:
+                return 0
+            elif blocks_h_overlap(b1, b2) and vertical:
+                _, t_1, _, b_1 = b1
+                _, t_2, _, b_2 = b2
+                if b_1 < t_2: # if b1 is closer to 0
+                    return t_2 - b_1
+                else:
+                    return t_1 - b_2
+            elif blocks_v_overlap(b1, b2) and horizontal:
+                l_1, _, r_1, _ = b1
+                l_2, _, r_2, _ = b2
+                if r_1 < l_2: # if b1 is closer to 0
+                    return l_2 - r_1
+                else:
+                    return l_1 - r_2
+            elif diag:
+                l_1, t_1, r_1, b_1 = b1
+                l_2, t_2, r_2, b_2 = b2
+                c_1 = x_1, y_1 = (l_1 + (r_1-l_1)/2, t_1 + (b_1-t_1)/2)
+                c_2 = x_2, y_2 = (l_2 + (r_2-l_2)/2, t_2 + (b_2-t_2)/2)
+                center_dist = euclidean_distance(c_1, c_2)
+                border_dists = []
+                for pt_1 in [(l_1, t_1), (l_1, b_1), (r_1, t_1), (r_1, b_1), (x_1, t_1), (x_1, b_1)]:
+                    for pt_2 in [(l_2, t_2), (l_2, b_2), (r_2, t_2), (r_2, b_2), (x_2, t_2), (x_2, b_2)]:
+                        border_dists.append(euclidean_distance(pt_1, pt_2))
+                dist = min(center_dist, min(border_dists))
+                return dist
             else:
-                return t_1 - b_2
-        elif blocks_v_overlap(b1, b2) and horizontal:
-            l_1, _, r_1, _ = b1
-            l_2, _, r_2, _ = b2
-            if r_1 < l_2: # if b1 is closer to 0
-                return l_2 - r_1
-            else:
-                return l_1 - r_2
-        elif diag:
-            l_1, t_1, r_1, b_1 = b1
-            l_2, t_2, r_2, b_2 = b2
-            c_1 = x_1, y_1 = (l_1 + (r_1-l_1)/2, t_1 + (b_1-t_1)/2)
-            c_2 = x_2, y_2 = (l_2 + (r_2-l_2)/2, t_2 + (b_2-t_2)/2)
-            center_dist = euclidean_distance(c_1, c_2)
-            border_dists = []
-            for pt_1 in [(l_1, t_1), (l_1, b_1), (r_1, t_1), (r_1, b_1), (x_1, t_1), (x_1, b_1)]:
-                for pt_2 in [(l_2, t_2), (l_2, b_2), (r_2, t_2), (r_2, b_2), (x_2, t_2), (x_2, b_2)]:
-                    border_dists.append(euclidean_distance(pt_1, pt_2))
-            dist = min(center_dist, min(border_dists))
-            return dist
-        else:
-            return 10**10
+                return 10**10
+        return DBSCAN_dist
 
-    DB = DB_from_blocks(blocks)
-    min_pts = 1
+    clustered_blocks_list = []
+    clustered_blocks = blocks[:]
+    for eps, (h,v,d), sep in params:
+        DB = DB_from_blocks(clustered_blocks)
+        min_pts = 1
 
-    clusters = DBSCAN(DB, DBSCAN_dist, eps, min_pts)
-    clustered_blocks = process_DBSCAN_clusters(clusters, blocks, horizontal=horizontal, vertical=vertical, diag=diag, sep=sep)
-
-    return clustered_blocks
+        DBSCAN_dist = make_DBSCAN_dist(h, v, d)
+        clusters = DBSCAN(DB, DBSCAN_dist, eps, min_pts)
+        clustered_blocks = process_DBSCAN_clusters(clusters, clustered_blocks, horizontal=h, vertical=v, diag=d, sep=sep)
+        clustered_blocks_list += [clustered_blocks]
+    return clustered_blocks_list
 
 
 def DB_from_blocks(blocks):
@@ -593,24 +608,21 @@ def combine_blocks(block_1, block_2, horizontal=False, vertical=False, diag=Fals
         top_block = block_1 if t_1 < t_2 else block_2
         bottom_block = block_2 if top_block == block_1 else block_1
         if len(top_block['texts']) == 1 and len(bottom_block['texts']) == 1:
-            new_block['texts'] = [top_block['texts'][0] + bottom_block['texts'][0]]
-            if sep != None:
-                new_block['texts'] = [[sep.join(new_block['texts'][0])]]
+            new_block['texts'] = [top_block['texts'][0] + ['\n'] + bottom_block['texts'][0]]
         else:
             new_block['texts'] = top_block['texts'] + bottom_block['texts']
     elif horizontal or (v_overlap and not h_overlap):
         left_block = block_1 if l_1 < l_2 else block_2
         right_block = block_2 if left_block == block_1 else block_1
-        if len(left_block['texts']) == 1 and len(right_block['texts']) == 1:
+        if (len(left_block['texts']) == 1 and '\n' in left_block['texts'][0]) or (len(right_block['texts']) == 1 and '\n' in right_block['texts'][0]):
             new_block['texts'] = [left_block['texts'][0] + right_block['texts'][0]]
-            if sep != None:
-                new_block['texts'] = [[sep.join(new_block['texts'][0])]]
         else:
             new_block['texts'] = left_block['texts'] + right_block['texts']
     else:
         first_block = block_1 if t_1 < t_2 else block_2
         second_block = block_2 if first_block == block_1 else block_1
         new_block['texts'] = first_block['texts'] + second_block['texts']
+    new_block['text'] = '\n'.join([' '.join(sub_block) for sub_block in new_block['texts']])
 
     return new_block
 
@@ -715,11 +727,10 @@ TELE_REGEX = r"^(?:(?:\+?1\s*(?:[.-]\s*)?)?(?:\(\s*([2-9]1[02-9]|[2-9][02-8]1|[2
 EMAIL_REGEX = r"[^@\s]+@[^@\s]+\.[^@\s.]+$"
 ALPHABET = set('abcdefghijklmnopqrstuvwxyz')
 NUMERALS = set('1234567890')
+
 def clean_word(word):
     word = word.lower()
-    if any(c in ALPHABET for c in word) and any(c in NUMERALS for c in word):
-        word = '__ALPHANUM__'
-    elif '$' in word:
+    if '$' in word:
         word = '__MONEY__'
     elif re.match(DATE_REGEX, word):
         word = '__DATE__'
@@ -788,31 +799,39 @@ def build_gt_classes(gt_blocks_list):
         for k in y.keys():
             classes.add(k)
     return sorted(classes)
-def build_ghega_Xy(img_filepaths, gt_filepaths, w2v, scaling_factor=1.0):
-    gt_blocks_list, blocks_list = [], []
+
+def build_ghega_X(img_filepaths, gt_filepaths, w2v, scaling_factor=1.0):
+    gt_blocks_list, blocks_list, clustered_blocks_list = [], [], []
     for i, (img_fp, gt_fp) in enumerate(zip(img_filepaths, gt_filepaths)):
         print('\n\nProcessing {} ({} of {})'.format(img_fp, i+1, len(img_filepaths)))
         
         blocks = import_blocks(None, img_filepath=img_fp)
-        eps, (h,v,d), sep = (7, (True,False,False), '')
-        blocks_list += [get_clustered_blocks(blocks[:], eps=eps, horizontal=h, vertical=v, diag=d, sep=sep)]
+        clustered_blocks = get_clustered_blocks(blocks[:], CUSTOM_PARAMS)
+        blocks_list += [clustered_blocks]
 
         gt_blocks_list += [import_groundtruth(gt_fp)]
     sorted_classes = build_gt_classes(gt_blocks_list)
 
+
+
     img_shape = w, h = PIL.Image.open(img_filepaths[0]).size 
     w, h = int(round(scaling_factor*w)), int(round(scaling_factor*h))
+    yield ((h,w,W2V_DIM+1))
 
     Xs = []; x_file = open("../data/preprocessed/patents_X.pickle", "wb")
     Ys = []; y_file = open("../data/preprocessed/patents_Y.pickle", "wb")
     # sparray((len(gt_filepaths), len(sorted_classes)+1))
     for i, (blocks, gt_blocks) in enumerate(zip(blocks_list, gt_blocks_list)):
         X = build_ghega_x(blocks, img_shape, w2v, scaling_factor=scaling_factor)
+        X_bag = {}
         Y = np.zeros((len(sorted_classes)+1))
         ROI_neg = sparray((h, w, 1))
         for x in range(w):
             for y in range(h):
                 ROI_neg[y,x] = 1
+
+
+
         for gt_block in gt_blocks:
             if gt_block['label_exists']:
                 ROI_l = sparray((h, w, 1))
@@ -823,12 +842,14 @@ def build_ghega_Xy(img_filepaths, gt_filepaths, w2v, scaling_factor=1.0):
                     for y in range(l_y, l_y+l_h+1):
                         ROI_l[y,x] = 1
                         ROI_neg[y,x] = 0
-                X_l = (X, ROI_l) # X_l = np.c_[X.dense(), ROI_l.dense()]
+                #X_l = (X, ROI_l)
+                X_l = np.c_[X.dense(), ROI_l.dense()]
                 Y_l = Y.copy()
                 Y_l[sorted_classes.index(gt_block['element_type'].lower()+'_label')] = 1
 
-                pickle.dump(X_l, x_file)# Xs.append(nparray_to_sparray_3d(X_l))
-                pickle.dump(Y_l, y_file)# Ys.append(Y_l)
+                yield X_l
+                #pickle.dump(X_l, x_file)# Xs.append(nparray_to_sparray_3d(X_l))
+                #pickle.dump(Y_l, y_file)# Ys.append(Y_l)
 
             if gt_block['value_text']:
                 ROI_v = sparray((h, w, 1))
@@ -839,20 +860,112 @@ def build_ghega_Xy(img_filepaths, gt_filepaths, w2v, scaling_factor=1.0):
                     for y in range(v_y, v_y+v_h+1):
                         ROI_v[y,x] = 1
                         ROI_neg[y,x] = 1
-                X_v = (X, ROI_v) # X_v = np.c_[X.dense(), ROI_v.dense()]
+                #X_v = (X, ROI_v)
+                X_v = np.c_[X.dense(), ROI_v.dense()]
                 Y_v = Y.copy()
                 Y_v[sorted_classes.index(gt_block['element_type'].lower()+'_value')] = 1
 
-                pickle.dump(X_v, x_file) #Xs.append(nparray_to_sparray_3d(X_v))
-                pickle.dump(Y_v, y_file) #Ys.append(Y_v)
+                yield X_v
+                #pickle.dump(X_v, x_file) #Xs.append(nparray_to_sparray_3d(X_v))
+                #pickle.dump(Y_v, y_file) #Ys.append(Y_v)
 
-        X_neg = (X, ROI_neg) # X_neg = np.c_[X, ROI_neg]
+        #X_neg = (X, ROI_neg) 
+        X_neg = np.c_[X.dense(), ROI_neg.dense()]
         Y_neg = Y.copy()
         Y_neg[-1] = 1
 
-        pickle.dump(X_neg, x_file) #Xs.append(nparray_to_sparray_3d(X_neg))
-        pickle.dump(Y_neg, y_file) #Ys.append(Y_neg)
-    return "../data/preprocessed/patents_X.pickle", "../data/preprocessed/patents_Y.pickle" #Xs, Ys
+        yield X_neg
+        #pickle.dump(X_neg, x_file) #Xs.append(nparray_to_sparray_3d(X_neg))
+        #pickle.dump(Y_neg, y_file) #Ys.append(Y_neg)
+
+
+def build_ghega_Y(img_filepaths, gt_filepaths, w2v, scaling_factor=1.0):
+    gt_blocks_list, blocks_list, clustered_blocks_list = [], [], []
+    for i, (img_fp, gt_fp) in enumerate(zip(img_filepaths, gt_filepaths)):
+        print('\n\nProcessing {} ({} of {})'.format(img_fp, i+1, len(img_filepaths)))
+        
+        blocks = import_blocks(None, img_filepath=img_fp)
+        params = CUSTOM_PARAMS[0]
+        eps, (h,v,d), sep = get_clustered_blocks(blocks[:], (eps, (h,v,d), sep))
+        blocks_list += [clustered_blocks]
+
+        for eps, (h,v,d), sep in CUSTOM_PARAMS[1:]:
+            clustered_blocks = get_clustered_blocks(clustered_blocks, (eps, (h,v,d), sep))
+            clustered_blocks_list += [clustered_blocks]
+
+        gt_blocks_list += [import_groundtruth(gt_fp)]
+    sorted_classes = build_gt_classes(gt_blocks_list)
+
+
+
+    img_shape = w, h = PIL.Image.open(img_filepaths[0]).size 
+    w, h = int(round(scaling_factor*w)), int(round(scaling_factor*h))
+
+    Xs = []; x_file = open("../data/preprocessed/patents_X.pickle", "wb")
+    Ys = []; y_file = open("../data/preprocessed/patents_Y.pickle", "wb")
+    # sparray((len(gt_filepaths), len(sorted_classes)+1))
+    for i, (blocks, gt_blocks) in enumerate(zip(blocks_list, gt_blocks_list)):
+        X = build_ghega_x(blocks, img_shape, w2v, scaling_factor=scaling_factor)
+        X_bag = {}
+        Y = np.zeros((len(sorted_classes)+1))
+        ROI_neg = sparray((h, w, 1))
+        for x in range(w):
+            for y in range(h):
+                ROI_neg[y,x] = 1
+
+
+
+        for gt_block in gt_blocks:
+            if gt_block['label_exists']:
+                ROI_l = sparray((h, w, 1))
+                l_x, l_y, l_w, l_h = gt_block['label_x'], gt_block['label_y'], gt_block['label_w'], gt_block['label_h']
+                l_x, l_y, l_w, l_h = int(round(scaling_factor*l_x)), int(round(scaling_factor*l_y)), int(round(scaling_factor*l_w)), int(round(scaling_factor*l_h))
+                # mark "region-of-interest" as 1, negative ROI as 0
+                for x in range(l_x, l_x+l_w+1):
+                    for y in range(l_y, l_y+l_h+1):
+                        ROI_l[y,x] = 1
+                        ROI_neg[y,x] = 0
+                #X_l = (X, ROI_l)
+                X_l = np.c_[X.dense(), ROI_l.dense()]
+                Y_l = Y.copy()
+                Y_l[sorted_classes.index(gt_block['element_type'].lower()+'_label')] = 1
+
+                #yield X_l
+                yield Y_l
+                #pickle.dump(X_l, x_file)# Xs.append(nparray_to_sparray_3d(X_l))
+                #pickle.dump(Y_l, y_file)# Ys.append(Y_l)
+
+            if gt_block['value_text']:
+                ROI_v = sparray((h, w, 1))
+                v_x, v_y, v_w, v_h = gt_block['value_x'], gt_block['value_y'], gt_block['value_w'], gt_block['value_h']
+                v_x, v_y, v_w, v_h = int(round(scaling_factor*v_x)), int(round(scaling_factor*v_y)), int(round(scaling_factor*v_w)), int(round(scaling_factor*v_h))
+                # mark "region-of-interest" as 1
+                for x in range(v_x, v_x+v_w+1):
+                    for y in range(v_y, v_y+v_h+1):
+                        ROI_v[y,x] = 1
+                        ROI_neg[y,x] = 1
+                #X_v = (X, ROI_v)
+                X_v = np.c_[X.dense(), ROI_v.dense()]
+                Y_v = Y.copy()
+                Y_v[sorted_classes.index(gt_block['element_type'].lower()+'_value')] = 1
+
+                #yield X_v
+                yield Y_v
+                #pickle.dump(X_v, x_file) #Xs.append(nparray_to_sparray_3d(X_v))
+                #pickle.dump(Y_v, y_file) #Ys.append(Y_v)
+
+        #X_neg = (X, ROI_neg) 
+        X_neg = np.c_[X.dense(), ROI_neg.dense()]
+        Y_neg = Y.copy()
+        Y_neg[-1] = 1
+
+        #yield X_neg
+        yield Y_neg
+        #pickle.dump(X_neg, x_file) #Xs.append(nparray_to_sparray_3d(X_neg))
+        #pickle.dump(Y_neg, y_file) #Ys.append(Y_neg)
+
+
+
 
 
 from gensim.models.word2vec import Word2Vec
@@ -910,13 +1023,13 @@ def nparray_to_sparray_3d(arr):
 
 
 
-def process_ghega_data():
+def process_ghega_data(b, e):
     img_filepaths = sorted(get_ghega_img_files('patents'))
     blocks_filepaths = sorted(get_ghega_blocks_files('patents'))
     gt_filepaths = sorted(get_ghega_gt_files('patents'))
 
     w2v_model = load_word2vec_model('../models/w2v.model')
-    return build_ghega_Xy(img_filepaths, gt_filepaths, w2v_model.wv, scaling_factor=0.1)
+    return build_ghega_X(img_filepaths[b:e], gt_filepaths[b:e], w2v_model.wv, scaling_factor=0.1), build_ghega_Y(img_filepaths[b:e], gt_filepaths[b:e], w2v_model.wv, scaling_factor=0.1)
 
 
 
@@ -926,8 +1039,6 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
 
 
 
@@ -945,8 +1056,248 @@ def extract_features_(blocks):
         feature_dict['words'] = set(value_words).union(label_words)
     return feature_dict
 
+def get_tesseract_analysis(img_filepath):
+    # cache filepath
+    img_filename = img_filepath.split('/')[-1]
+    cache_filename = img_filename + '.tesseract-la'
+    cache_filepath = TESSERACT_CACHE_DIR + '/' + cache_filename
+
+    if os.path.exists(cache_filepath):
+        print('Found {} in cache!'.format(cache_filepath))
+        with open(cache_filepath, 'r') as cache_file:
+            res = cache_file.read()
+    else:
+        print("Running pytesseract layout analysis for {}...".format(img_filepath))
+        img = PIL.Image.open(img_filepath)
+        res = pytesseract.image_to_data(img, config='--psm 1 tsv', lang='eng')
+
+        with open(cache_filepath, 'w') as cache_file:
+            cache_file.write(res)
+    res = unicode(res)
+    return io.StringIO(res)
+
+def find_matching_gt_block(block, gt_blocks):
+    b1 = block['x'], block['y'], block['x']+block['w'], block['y']+block['h']
+    print('\n\n>>>>>')
+    print(block['texts'])
+    for gt_block in gt_blocks:
+        if gt_block['label_exists']:
+            gt_block_label = {}
+            gt_block_label['element_type'] = gt_block['element_type']
+            gt_block_label['block_type'] = 'label'
+            gt_block_label['x'] = gt_block['label_x']
+            gt_block_label['y'] = gt_block['label_y']
+            gt_block_label['w'] = gt_block['label_w']
+            gt_block_label['h'] = gt_block['label_h']
+            gt_block_label['text'] = gt_block['label_text']
+            gt_block_label['words'] = set([word.lower() for word in gt_block_label['text'].split()])
+            b2 = gt_block_label['x'], gt_block_label['y'], gt_block_label['x']+gt_block_label['w'], gt_block_label['y']+gt_block_label['h']
+            #print(gt_block_label['words'])
+            if all([any([label_word in text for sub_block in block['texts'] for text in sub_block]) for label_word in gt_block_label['words']]):
+                return gt_block_label
+        gt_block_value = {}
+        gt_block_value['element_type'] = gt_block['element_type']
+        gt_block_value['block_type'] = 'value'
+        gt_block_value['x'] = gt_block['value_x']
+        gt_block_value['y'] = gt_block['value_y']
+        gt_block_value['w'] = gt_block['value_w']
+        gt_block_value['h'] = gt_block['value_h']
+        gt_block_value['text'] = gt_block['value_text']
+        gt_block_value['words'] = set([word.lower() for word in gt_block_label['text'].split()])
+        b2 = gt_block_value['x'], gt_block_value['y'], gt_block_value['x']+gt_block_value['w'], gt_block_value['y']+gt_block_value['h']
+        #print(gt_block_value['words'])
+        if all([any([value_word in text for sub_block in block['texts'] for text in sub_block]) for value_word in gt_block_value['words']]):
+            return gt_block_value
+    return None
 
 
+# features[word_1]:
+#   hAlign_word_2
+#   sameBlock_word_2
+#   len_line
+#   len_block
+def process_tesseract_analysis(tsv, gt_blocks, vAlignThresh=15):
+    word_dicts = read_csv(tsv, sep='\t', header=0).T.to_dict().values()
+    words = set()
+    prev_word_num = -1
+    prev_line_num = -1
+    prev_block_num = -1
+    line = []
+    block = []
+    line_blocks = []
+    line_clusters = []
+    text_blocks = []
+    clustered_blocks = []
+
+    features = {}
+    # iterate over word blocks
+    for i, word_dict in enumerate(word_dicts):
+
+        # if block is textual
+        if word_dict['text']:
+            if str(word_dict['text']).lower() == 'nan':
+                continue
+            word_dict['w'] = int(word_dict['width'])
+            word_dict['h'] = int(word_dict['height'])
+            word_dict['x'] = int(word_dict['left'])
+            word_dict['y'] = int(word_dict['top'])
+            word_dict['texts'] = [[word_dict['text'].lower()]]
+            text_blocks += [word_dict]
+
+            word = word_dict['text'] = word_dict['text'].lower()
+            features[word] = {}
+            features[word]['w'] = word_dict['w']
+            features[word]['h'] = word_dict['h']
+            features[word]['x'] = word_dict['x']
+            features[word]['y'] = word_dict['y']
+            words.add(word)
+
+            line_num = word_dict['line_num']
+            if line_num == prev_line_num or prev_line_num == -1:
+                line += [word]
+                line_blocks += [word_dict]
+            if line_num != prev_line_num or i == len(word_dicts)-1:
+                # end of prev line
+                line_words = set(line)
+                for word_1 in line_words:
+                    for word_2 in line_words:
+                        if word_1 != word_2:
+                            features[word_1]['hAlign_'+word_2] = True
+                            features[word_2]['hAlign_'+word_1] = True
+                    features[word_1]['line_len'] = len(line)
+
+                if line_blocks:
+                    clustered_line = line_blocks[0]
+                    for word_block in line_blocks[1:]:
+                        clustered_line = combine_blocks(clustered_line, word_block, horizontal=True, sep=' ')
+                    line_clusters += [clustered_line]
+                    line = []
+                    line_blocks = []
+            prev_line_num = line_num
+
+            block_num = word_dict['block_num']
+            if block_num == prev_block_num or prev_block_num == -1:
+                block += [word]
+            if block_num != prev_block_num or i == len(word_dicts)-1:
+                # end of prev block
+                
+                if line_clusters:
+                    clustered_block = line_clusters[0]
+                    for clustered_line in line_clusters[1:]:
+                        clustered_block = combine_blocks(clustered_block, clustered_line, vertical=True, sep='\n')
+
+                    clustered_block_words = set(block)
+                    for word_1 in clustered_block_words:
+                        for word_2 in clustered_block_words:
+                            if word_1 != word_2:
+                                features[word_1]['sameBlock_'+word_2] = True
+                                features[word_2]['sameBlock_'+word_1] = True
+                        features[word_1]['block_len'] = len(block)
+
+                clustered_blocks += [clustered_block]
+                block = []
+                line_clusters = []
+            prev_block_num = block_num
+
+    for w_1, word_1 in features.iteritems():
+        x_1 = word_1['x']+word_1['w']/2
+        for w_2, word_2 in features.iteritems():
+            if w_1 != w_2:
+                x_2 = word_2['x']+word_2['w']/2
+                if abs(x_1 - x_2) < vAlignThresh:
+                    features[w_1]['vAlign_'+w_2] = True
+                    features[w_2]['vAlign_'+w_1] = True
+    return features
+
+from collections import defaultdict
+def get_clusters(blocks, clustered_blocks):
+    clusters = defaultdict(set)
+    cluster_of_block = {}
+    for block in blocks:
+        b1 = block['x'], block['y'], block['x']+block['w'], block['y']+block['h']
+        for c, clustered_block in enumerate(clustered_blocks):
+            b2 = clustered_block['x'], clustered_block['y'], clustered_block['x']+clustered_block['w'], clustered_block['y']+clustered_block['h']
+            if blocks_do_intersect(b1, b2):
+                clusters[c].add(b1)
+                cluster_of_block[b1] = c
+    return clusters, cluster_of_block
+
+def is_text(text):
+    return any(all(c in ALPHABET for c in word) for word in text.split())
+
+def is_numeric(text):
+    try:
+        _ = float(text)
+        return True
+    except ValueError:
+        return False
+
+def is_alphanumeric(text):
+    return all(c in ALPHABET or c in NUMERALS for c in text)
+
+VALIGN_THRESH = 10
+def process_blocks(blocks, gt_blocks, clustered_blocks, vAlignThresh=15):
+    for block in blocks:
+        block['text'] = clean_sentence(block['text'])
+        block['texts'] = [[block['text']]]
+    clusters, cluster_of_block = get_clusters(blocks, clustered_blocks)
+    features = []
+    for block in blocks:
+        block_features = {'text':None, 'block_type':None, 'element_type':None, 'hAlign':set(), 'vAlign':set(), 'sameCluster':set(), 'num_words':None, 'num_chars':None}
+        block_features['text'] = text = block['text']
+        block_features['num_words'] = len(text.split())
+        block_features['num_chars'] = len(text)
+        block_features['is_text'] = is_text(text)
+        block_features['is_num'] = is_numeric(text)
+        block_features['is_alphanumeric'] = is_alphanumeric(text)
+        for gt_block in gt_blocks:
+            if gt_block['label_exists']:
+                if block['text'] == gt_block['label_text']:
+                    block_features['block_type'] = 'label'
+                    block_features['element_type'] = gt_block['element_type']
+            if block['text'] == gt_block['value_text']:
+                block_features['block_type'] = 'value'
+                block_features['element_type'] = gt_block['element_type']
+        for block_ in blocks:
+            # hAlign
+            if blocks_v_overlap(b1, b2):
+                hAlign_words = set([word for sub_block in block_['texts'] for line in sub_block for word in line.split()])
+                block_features['hAlign'].update(hAlign_words)
+
+            # vAlign
+            b1 = x_1,_,w_1,_ = block['x'], block['y'], block['x']+block['w'], block['y']+block['h']
+            b2 = x_2,_,w_2,_ = block_['x'], block_['y'], block_['x']+block_['w'], block_['y']+block_['h']
+            if abs(x_1 - x_2) < VALIGN_THRESH or abs((x_1+w_1) - (x_2+w_2)) < VALIGN_THRESH:
+                    vAlign_words = set([word for sub_block in block_['texts'] for line in sub_block for word in line.split()])
+                    block_features['vAlign'].update(vAlign_words)
+
+            # sameCluster
+            if cluster_of_block[b1] == cluster_of_block[b2]:
+                cluster_words = set([word for sub_block in block_['texts'] for line in sub_block for word in line.split()])
+                block_features['sameCluster'].update(cluster_words)
+        features += [block_features]
+    return features
+
+
+
+def process_ghega_data_2(l=None):
+    img_filepaths = sorted(get_ghega_img_files('patents'))
+    blocks_filepaths = sorted(get_ghega_blocks_files('patents'))
+    gt_filepaths = sorted(get_ghega_gt_files('patents'))
+
+    feature_list = []
+    feature_labels = set()
+    gt_labels = set()
+    for blocks_fp, gt_fp in zip(blocks_filepaths[:l], gt_filepaths[:l]):
+        blocks = import_blocks(blocks_fp)
+        gt_blocks = import_groundtruth(gt_fp)
+
+        clustered_blocks = get_clustered_blocks(blocks[:], CUSTOM_PARAMS[1:])
+
+        features = process_blocks(blocks, gt_blocks, clustered_blocks[-1])
+        feature_list += [features]
+    return feature_list
+    
 
 
 
